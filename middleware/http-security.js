@@ -18,6 +18,12 @@ function allowedOrigins() {
     origins.add(configured)
   }
 
+  const backend = normalizeOrigin(process.env.BACKEND_PUBLIC_URL)
+
+  if (backend) {
+    origins.add(backend)
+  }
+
   if (process.env.NODE_ENV !== 'production') {
     origins.add('http://localhost:3000')
     origins.add('http://localhost:5173')
