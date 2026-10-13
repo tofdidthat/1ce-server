@@ -37,6 +37,7 @@ import {
   stripePlanFromStatus
 } from './routes/stripe-routes.js'
 import { createMetaRouter } from './routes/meta-routes.js'
+import { createPackRouter } from './routes/pack-routes.js'
 
 const { Pool } = pg
 
@@ -260,6 +261,13 @@ app.use(
   createMetaRouter({
     db,
     isValidInternalRequest
+  })
+)
+
+app.use(
+  createPackRouter({
+    db,
+    getAccountFromRequest
   })
 )
 
