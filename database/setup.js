@@ -1,3 +1,4 @@
+import { setupPacksSchema } from '../packs-schema.js'
 export function createDatabaseSetup({
   db,
   setupDesktopDatabase,
@@ -386,10 +387,15 @@ export function createDatabaseSetup({
     )
   `)
       
-    await setupDesktopDatabase(db)
+        await setupDesktopDatabase(db)
+    await setupPacksSchema(db)
     await setupPublicationDatabase(db)
+
     ready = true
-    console.log('Telegram + Discord + Desktop database ready.')
+
+    console.log(
+      'Telegram + Discord + Desktop + Packs database ready.'
+    )
     } catch (error) {
       ready = false
   
