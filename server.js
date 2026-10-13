@@ -2,6 +2,9 @@ import express from 'express'
 import pg from 'pg'
 import path from 'path'
 import { fileURLToPath } from 'node:url'
+import {
+  createBeatUploadRouter
+} from './routes/beat-upload-routes.js'
 
 import {
   createDesktopRouter,
@@ -269,6 +272,15 @@ app.use(
   createPackRouter({
     db,
     getAccountFromRequest
+  })
+)
+
+app.use(
+  '/api',
+  createBeatUploadRouter({
+    db,
+    getAccountFromRequest,
+    execFileAsync
   })
 )
 
