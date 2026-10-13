@@ -68,28 +68,47 @@ export function createPackRouter({
       if (!account) return
 
       const result = await db.query(
-        `
-          SELECT
-            p.id,
-            p.name,
-            p.created_at,
-            p.updated_at,
-            COUNT(pb.beat_id)::int AS beat_count
-          FROM account_packs p
-          LEFT JOIN account_pack_beats pb
-            ON pb.pack_id = p.id
-          WHERE p.user_id = $1
-          GROUP BY
-            p.id,
-            p.name,
-            p.created_at,
-            p.updated_at
+  `
+    SELECT
+      p.id,
+      p.name,
+      p.created_at,
+      p.updated_at,
+
+      COUNT(pb.beat_id)::int AS beat_count,
+
+      COALESCE(
+        array_agg(
+          pb.beat_id
           ORDER BY
-            p.created_at DESC,
-            p.id DESC
-        `,
-        [account.id]
-      )
+            pb.position ASC,
+            pb.created_at ASC,
+            pb.beat_id ASC
+        ) FILTER (
+          WHERE pb.beat_id IS NOT NULL
+        ),
+        ARRAY[]::uuid[]
+      ) AS beat_ids
+
+    FROM account_packs p
+
+    LEFT JOIN account_pack_beats pb
+      ON pb.pack_id = p.id
+
+    WHERE p.user_id = $1
+
+    GROUP BY
+      p.id,
+      p.name,
+      p.created_at,
+      p.updated_at
+
+    ORDER BY
+      p.created_at DESC,
+      p.id DESC
+  `,
+  [account.id]
+)
 
       return res.json({
         packs: result.rows
