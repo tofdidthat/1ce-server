@@ -77,18 +77,23 @@ async function createTestApp() {
   )
 
   await db.query(
-    `
-      INSERT INTO account_beats (
-        id,
-        user_id,
-        title
-      )
-      VALUES
-        ($1, $2, 'Beat one'),
-        ($3, $2, 'Beat two')
-    `,
-    [BEAT_ONE, USER_ONE, BEAT_TWO]
-  )
+  `
+    INSERT INTO account_beats (
+      id,
+      user_id,
+      title
+    )
+    VALUES
+      ($1, $2, 'Beat one'),
+      ($3, $4, 'Beat two')
+  `,
+  [
+    BEAT_ONE,
+    USER_ONE,
+    BEAT_TWO,
+    USER_TWO
+  ]
+)
 
   const accounts = new Map([
     ['user-one-token', { id: USER_ONE }],
