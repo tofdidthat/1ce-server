@@ -317,118 +317,118 @@ export function createPackRouter({
   )
 
   router.post(
-    '/me/packs/:packId/beats',
-    async (req, res) => {
-      try {
-        const account =
-          await requireAccount(req, res)
+  '/me/packs/:packId/beats',
+  async (req, res) => {
+    try {
+      const account =
+        await requireAccount(req, res)
 
-        if (!account) return
+      if (!account) return
 
-        const packId = req.params.packId
-        const beatId = req.body?.beatId
+      const packId = req.params.packId
+      const beatId = req.body?.beatId
 
-        if (!isValidUuid(packId)) {
-          return res.status(404).json({
-            error: 'Pack not found.'
-          })
-        }
-
-        if (!isValidUuid(beatId)) {
-          return res.status(400).json({
-            error: 'Invalid beat ID.'
-          })
-        }
-
-        const pack = await getOwnedPack(
-  packId,
-  account.id
-)
-
-if (!pack) {
-  return res.status(404).json({
-    error: 'Pack not found.'
-  })
-}
-
-const beat = await db.query(
-  `
-    SELECT id
-    FROM account_beats
-    WHERE id = $1
-      AND user_id = $2
-    LIMIT 1
-  `,
-  [beatId, account.id]
-)
-
-if (!beat.rows.length) {
-  return res.status(404).json({
-    error: 'Beat not found.'
-  })
-}
-
-        const positionResult = await db.query(
-          `
-            SELECT
-              COALESCE(MAX(position), -1) + 1
-              AS next_position
-            FROM account_pack_beats
-            WHERE pack_id = $1
-          `,
-          [packId]
-        )
-
-        const position =
-          positionResult.rows[0].next_position
-
-        const inserted = await db.query(
-          `
-            INSERT INTO account_pack_beats (
-              pack_id,
-              beat_id,
-              position
-            )
-            VALUES ($1, $2, $3)
-            ON CONFLICT (pack_id, beat_id)
-            DO NOTHING
-            RETURNING beat_id
-          `,
-          [packId, beatId, position]
-        )
-
-        if (!inserted.rows.length) {
-          return res.json({
-            ok: true,
-            alreadyAdded: true
-          })
-        }
-
-        await db.query(
-          `
-            UPDATE account_packs
-            SET updated_at = NOW()
-            WHERE id = $1
-          `,
-          [packId]
-        )
-
-        return res.status(201).json({
-          ok: true,
-          alreadyAdded: false
-        })
-      } catch (error) {
-        console.error(
-          'Add beat to pack error:',
-          error
-        )
-
-        return res.status(500).json({
-          error: 'Unable to add beat to pack.'
+      if (!isValidUuid(packId)) {
+        return res.status(404).json({
+          error: 'Pack not found.'
         })
       }
+
+      if (!isValidUuid(beatId)) {
+        return res.status(400).json({
+          error: 'Invalid beat ID.'
+        })
+      }
+
+      const pack = await getOwnedPack(
+        packId,
+        account.id
+      )
+
+      if (!pack) {
+        return res.status(404).json({
+          error: 'Pack not found.'
+        })
+      }
+
+      const beat = await db.query(
+        `
+          SELECT id
+          FROM account_beats
+          WHERE id = $1
+            AND user_id = $2
+          LIMIT 1
+        `,
+        [beatId, account.id]
+      )
+
+      if (!beat.rows.length) {
+        return res.status(404).json({
+          error: 'Beat not found.'
+        })
+      }
+
+      const positionResult = await db.query(
+        `
+          SELECT
+            COALESCE(MAX(position), -1) + 1
+            AS next_position
+          FROM account_pack_beats
+          WHERE pack_id = $1
+        `,
+        [packId]
+      )
+
+      const position =
+        positionResult.rows[0].next_position
+
+      const inserted = await db.query(
+        `
+          INSERT INTO account_pack_beats (
+            pack_id,
+            beat_id,
+            position
+          )
+          VALUES ($1, $2, $3)
+          ON CONFLICT (pack_id, beat_id)
+          DO NOTHING
+          RETURNING beat_id
+        `,
+        [packId, beatId, position]
+      )
+
+      if (!inserted.rows.length) {
+        return res.json({
+          ok: true,
+          alreadyAdded: true
+        })
+      }
+
+      await db.query(
+        `
+          UPDATE account_packs
+          SET updated_at = NOW()
+          WHERE id = $1
+        `,
+        [packId]
+      )
+
+      return res.status(201).json({
+        ok: true,
+        alreadyAdded: false
+      })
+    } catch (error) {
+      console.error(
+        'Add beat to pack error:',
+        error
+      )
+
+      return res.status(500).json({
+        error: 'Unable to add beat to pack.'
+      })
     }
-  )
+  }
+)
 
   router.delete(
     '/me/packs/:packId/beats/:beatId',
