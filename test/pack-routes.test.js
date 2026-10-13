@@ -154,8 +154,7 @@ async function request(app, options) {
         headers: {
           ...(token
             ? {
-                authorization:
-                  `Bearer ${token}`
+                authorization: `Bearer ${token}`
               }
             : {}),
 
@@ -377,7 +376,7 @@ test(
 )
 
 test(
-  'pack can include only beats owned by the same user',
+  'pack accepts only beats owned by the same user',
   async () => {
     const { app, db, close } =
       await createTestApp()
@@ -412,4 +411,149 @@ test(
         false
       )
 
-      const repeated = await request
+      const repeated = await request(app, {
+        method: 'POST',
+        path: `/api/me/packs/${packId}/beats`,
+        token: 'user-one-token',
+        body: {
+          beatId: BEAT_ONE
+        }
+      })
+
+      assert.equal(repeated.status, 200)
+
+      assert.equal(
+        repeated.body.alreadyAdded,
+        true
+      )
+
+      const foreignBeatAttempt =
+        await request(app, {
+          method: 'POST',
+          path: `/api/me/packs/${packId}/beats`,
+          token: 'user-one-token',
+          body: {
+            beatId: BEAT_TWO
+          }
+        })
+
+      assert.equal(
+        foreignBeatAttempt.status,
+        404
+      )
+
+      const links = await db.query(
+        `
+          SELECT beat_id
+          FROM account_pack_beats
+          WHERE pack_id = $1
+        `,
+        [packId]
+      )
+
+      assert.equal(links.rows.length, 1)
+
+      assert.equal(
+        links.rows[0].beat_id,
+        BEAT_ONE
+      )
+
+      const removed = await request(app, {
+        method: 'DELETE',
+        path:
+          `/api/me/packs/${packId}/beats/${BEAT_ONE}`,
+        token: 'user-one-token'
+      })
+
+      assert.equal(removed.status, 200)
+
+      const beatAfterRemove =
+        await db.query(
+          `
+            SELECT id
+            FROM account_beats
+            WHERE id = $1
+          `,
+          [BEAT_ONE]
+        )
+
+      assert.equal(
+        beatAfterRemove.rows.length,
+        1
+      )
+
+      const linksAfterRemove =
+        await db.query(
+          `
+            SELECT beat_id
+            FROM account_pack_beats
+            WHERE pack_id = $1
+          `,
+          [packId]
+        )
+
+      assert.equal(
+        linksAfterRemove.rows.length,
+        0
+      )
+    } finally {
+      await close()
+    }
+  }
+)
+
+test(
+  'deleting a pack preserves its beats',
+  async () => {
+    const { app, db, close } =
+      await createTestApp()
+
+    try {
+      const created = await request(app, {
+        method: 'POST',
+        path: '/api/me/packs',
+        token: 'user-one-token',
+        body: {
+          name: 'Deletable pack',
+          beatId: BEAT_ONE
+        }
+      })
+
+      assert.equal(created.status, 201)
+
+      const packId = created.body.pack.id
+
+      const deleted = await request(app, {
+        method: 'DELETE',
+        path: `/api/me/packs/${packId}`,
+        token: 'user-one-token'
+      })
+
+      assert.equal(deleted.status, 200)
+
+      const beat = await db.query(
+        `
+          SELECT id
+          FROM account_beats
+          WHERE id = $1
+        `,
+        [BEAT_ONE]
+      )
+
+      assert.equal(beat.rows.length, 1)
+
+      const links = await db.query(
+        `
+          SELECT pack_id
+          FROM account_pack_beats
+          WHERE beat_id = $1
+        `,
+        [BEAT_ONE]
+      )
+
+      assert.equal(links.rows.length, 0)
+    } finally {
+      await close()
+    }
+  }
+)
