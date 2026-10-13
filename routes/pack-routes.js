@@ -341,32 +341,32 @@ export function createPackRouter({
         }
 
         const pack = await getOwnedPack(
-          packId,
-          account.id
-        )
+  packId,
+  account.id
+)
 
-        if (!pack) {
-          return res.status(404).json({
-            error: 'Pack not found.'
-          })
-        }
+if (!pack) {
+  return res.status(404).json({
+    error: 'Pack not found.'
+  })
+}
 
-        const beat = await db.query(
-          `
-            SELECT id
-            FROM account_beats
-            WHERE id = $1
-              AND user_id = $2
-            LIMIT 1
-          `,
-          [beatId, account.id]
-        )
+const beat = await db.query(
+  `
+    SELECT id
+    FROM account_beats
+    WHERE id = $1
+      AND user_id = $2
+    LIMIT 1
+  `,
+  [beatId, account.id]
+)
 
-        if (!beat.rows.length) {
-          return res.status(404).json({
-            error: 'Beat not found.'
-          })
-        }
+if (!beat.rows.length) {
+  return res.status(404).json({
+    error: 'Beat not found.'
+  })
+}
 
         const positionResult = await db.query(
           `
