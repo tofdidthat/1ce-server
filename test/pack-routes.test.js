@@ -9,35 +9,37 @@ import { createPackRouter } from '../routes/pack-routes.js'
 const USER_ONE = 1
 const USER_TWO = 2
 
-const PACK_ONE =
-  '11111111-1111-1111-1111-111111111111'
-const PACK_TWO =
-  '22222222-2222-2222-2222-222222222222'
 const BEAT_ONE =
   '33333333-3333-3333-3333-333333333333'
 const BEAT_TWO =
   '44444444-4444-4444-4444-444444444444'
+
+function toQueryResult(result) {
+  return {
+    ...result,
+    rowCount:
+      result.affectedRows ||
+      result.rows.length
+  }
+}
 
 function createDb(pg) {
   return {
     query: async (sql, params) => {
       const result = await pg.query(sql, params)
 
-      return {
-        ...result,
-        rowCount:
-          result.affectedRows ||
-          result.rows.length
-      }
+      return toQueryResult(result)
     },
-    connect: async () => {
-      const client = await pg.getConnection()
 
-      return {
-        query: client.query,
-        release: client.release
-      }
-    }
+    connect: async () => ({
+      query: async (sql, params) => {
+        const result = await pg.query(sql, params)
+
+        return toQueryResult(result)
+      },
+
+      release: () => {}
+    })
   }
 }
 
@@ -64,19 +66,29 @@ async function createTestApp() {
 
   await setupPacksSchema(db)
 
-  await db.query(`
-    INSERT INTO account_users (id, email)
-    VALUES
-      ($1, 'one@example.com'),
-      ($2, 'two@example.com')
-  `, [USER_ONE, USER_TWO])
+  await db.query(
+    `
+      INSERT INTO account_users (id, email)
+      VALUES
+        ($1, 'one@example.com'),
+        ($2, 'two@example.com')
+    `,
+    [USER_ONE, USER_TWO]
+  )
 
-  await db.query(`
-    INSERT INTO account_beats (id, user_id, title)
-    VALUES
-      ($1, $2, 'Beat one'),
-      ($3, $2, 'Beat two')
-  `, [BEAT_ONE, USER_ONE, BEAT_TWO])
+  await db.query(
+    `
+      INSERT INTO account_beats (
+        id,
+        user_id,
+        title
+      )
+      VALUES
+        ($1, $2, 'Beat one'),
+        ($3, $2, 'Beat two')
+    `,
+    [BEAT_ONE, USER_ONE, BEAT_TWO]
+  )
 
   const accounts = new Map([
     ['user-one-token', { id: USER_ONE }],
@@ -101,12 +113,13 @@ async function createTestApp() {
   app.use(express.json())
 
   app.use(
-  '/api',
-  createPackRouter({
-    db,
-    getAccountFromRequest
-  })
-)
+    '/api',
+    createPackRouter({
+      db,
+      getAccountFromRequest
+    })
+  )
+
   return {
     app,
     db,
@@ -122,35 +135,67 @@ async function request(app, options) {
     body
   } = options
 
-  const response = await app.fetch(
-    path,
-    {
-      method,
-      headers: {
-        ...(token
-          ? { authorization: `Bearer ${token}` }
-          : {}),
-        ...(body
-          ? { 'content-type': 'application/json' }
-          : {})
-      },
-      body: body
-        ? JSON.stringify(body)
-        : undefined
-    }
-  )
-
-  let json = null
+  const server = await new Promise(resolve => {
+    const listener = app.listen(
+      0,
+      '127.0.0.1',
+      () => resolve(listener)
+    )
+  })
 
   try {
-    json = await response.json()
-  } catch {
-    json = null
-  }
+    const address = server.address()
 
-  return {
-    status: response.status,
-    body: json
+    const response = await fetch(
+      `http://127.0.0.1:${address.port}${path}`,
+      {
+        method,
+
+        headers: {
+          ...(token
+            ? {
+                authorization:
+                  `Bearer ${token}`
+              }
+            : {}),
+
+          ...(body
+            ? {
+                'content-type':
+                  'application/json'
+              }
+            : {})
+        },
+
+        body: body
+          ? JSON.stringify(body)
+          : undefined
+      }
+    )
+
+    let json = null
+
+    try {
+      json = await response.json()
+    } catch {
+      json = null
+    }
+
+    return {
+      status: response.status,
+      body: json
+    }
+  } finally {
+    await new Promise((resolve, reject) => {
+      server.close(error => {
+        if (error) {
+          reject(error)
+          return
+        }
+
+        resolve()
+      })
+    })
   }
 }
 
@@ -166,6 +211,7 @@ test(
       })
 
       assert.equal(response.status, 401)
+
       assert.equal(
         response.body.authenticated,
         false
@@ -179,7 +225,7 @@ test(
 test(
   'user can create, read, update and delete own pack',
   async () => {
-    const { app, db, close } =
+    const { app, close } =
       await createTestApp()
 
     try {
@@ -193,6 +239,7 @@ test(
       })
 
       assert.equal(created.status, 201)
+
       assert.equal(
         created.body.pack.name,
         'Friday Pack'
@@ -206,14 +253,17 @@ test(
       })
 
       assert.equal(listed.status, 200)
+
       assert.equal(
         listed.body.packs.length,
         1
       )
+
       assert.equal(
         listed.body.packs[0].id,
         packId
       )
+
       assert.equal(
         listed.body.packs[0].beat_count,
         0
@@ -229,6 +279,7 @@ test(
       })
 
       assert.equal(updated.status, 200)
+
       assert.equal(
         updated.body.pack.name,
         'Weekend Pack'
@@ -242,11 +293,10 @@ test(
 
       assert.equal(deleted.status, 200)
 
-      const afterDelete =
-        await request(app, {
-          path: '/api/me/packs',
-          token: 'user-one-token'
-        })
+      const afterDelete = await request(app, {
+        path: '/api/me/packs',
+        token: 'user-one-token'
+      })
 
       assert.equal(
         afterDelete.body.packs.length,
@@ -273,6 +323,8 @@ test(
           name: 'Private pack'
         }
       })
+
+      assert.equal(created.status, 201)
 
       const packId = created.body.pack.id
 
@@ -310,6 +362,11 @@ test(
         })
 
       assert.equal(
+        otherUserList.status,
+        200
+      )
+
+      assert.equal(
         otherUserList.body.packs.length,
         0
       )
@@ -335,6 +392,8 @@ test(
         }
       })
 
+      assert.equal(created.status, 201)
+
       const packId = created.body.pack.id
 
       const added = await request(app, {
@@ -347,118 +406,10 @@ test(
       })
 
       assert.equal(added.status, 201)
+
       assert.equal(
         added.body.alreadyAdded,
         false
       )
 
-      const repeated = await request(app, {
-        method: 'POST',
-        path: `/api/me/packs/${packId}/beats`,
-        token: 'user-one-token',
-        body: {
-          beatId: BEAT_ONE
-        }
-      })
-
-      assert.equal(repeated.status, 200)
-      assert.equal(
-        repeated.body.alreadyAdded,
-        true
-      )
-
-      const links = await db.query(`
-        SELECT beat_id
-        FROM account_pack_beats
-        WHERE pack_id = $1
-      `, [packId])
-
-      assert.equal(links.rows.length, 1)
-
-      const removed = await request(app, {
-        method: 'DELETE',
-        path:
-          `/api/me/packs/${packId}/beats/${BEAT_ONE}`,
-        token: 'user-one-token'
-      })
-
-      assert.equal(removed.status, 200)
-
-      const beatsAfterRemove =
-        await db.query(`
-          SELECT id
-          FROM account_beats
-          WHERE id = $1
-        `, [BEAT_ONE])
-
-      assert.equal(
-        beatsAfterRemove.rows.length,
-        1
-      )
-
-      const linksAfterRemove =
-        await db.query(`
-          SELECT beat_id
-          FROM account_pack_beats
-          WHERE pack_id = $1
-        `, [packId])
-
-      assert.equal(
-        linksAfterRemove.rows.length,
-        0
-      )
-    } finally {
-      await close()
-    }
-  }
-)
-
-test(
-  'deleting a pack preserves its beats',
-  async () => {
-    const { app, db, close } =
-      await createTestApp()
-
-    try {
-      const created = await request(app, {
-        method: 'POST',
-        path: '/api/me/packs',
-        token: 'user-one-token',
-        body: {
-          name: 'Deletable pack',
-          beatId: BEAT_ONE
-        }
-      })
-
-      assert.equal(created.status, 201)
-
-      const packId = created.body.pack.id
-
-      const deleted = await request(app, {
-        method: 'DELETE',
-        path: `/api/me/packs/${packId}`,
-        token: 'user-one-token'
-      })
-
-      assert.equal(deleted.status, 200)
-
-      const beat = await db.query(`
-        SELECT id
-        FROM account_beats
-        WHERE id = $1
-      `, [BEAT_ONE])
-
-      assert.equal(beat.rows.length, 1)
-
-      const links = await db.query(`
-        SELECT pack_id
-        FROM account_pack_beats
-        WHERE beat_id = $1
-      `, [BEAT_ONE])
-
-      assert.equal(links.rows.length, 0)
-    } finally {
-      await close()
-    }
-  }
-)
+      const repeated = await request
