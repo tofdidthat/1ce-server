@@ -265,6 +265,7 @@ app.use(
 )
 
 app.use(
+  '/api',
   createPackRouter({
     db,
     getAccountFromRequest
