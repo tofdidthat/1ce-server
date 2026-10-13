@@ -101,12 +101,12 @@ async function createTestApp() {
   app.use(express.json())
 
   app.use(
-    createPackRouter({
-      db,
-      getAccountFromRequest
-    })
-  )
-
+  '/api',
+  createPackRouter({
+    db,
+    getAccountFromRequest
+  })
+)
   return {
     app,
     db,
