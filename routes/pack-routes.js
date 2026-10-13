@@ -198,4 +198,12 @@ export function createPackRouter({
       })
     } finally {
       client.release()
-    }
+      })
+
+  // PATCH /me/packs/:packId
+  // DELETE /me/packs/:packId
+  // POST /me/packs/:packId/beats
+  // DELETE /me/packs/:packId/beats/:beatId
+
+  return router
+}
