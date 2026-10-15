@@ -171,13 +171,13 @@ export function createHttpSecurityMiddleware() {
   'GET, POST, PUT, PATCH, DELETE, OPTIONS'
 )
     res.setHeader(
-      'Access-Control-Allow-Headers',
-      'Content-Type, Authorization, X-1CE-Internal-Secret'
-    )
+  'Access-Control-Allow-Headers',
+  'Content-Type, Authorization, Range, X-1CE-Internal-Secret'
+)
     res.setHeader(
-      'Access-Control-Expose-Headers',
-      'X-Render-Id, Retry-After'
-    )
+  'Access-Control-Expose-Headers',
+  'X-Render-Id, Retry-After, Accept-Ranges, Content-Range, Content-Length'
+)
 
     if (req.method === 'OPTIONS') {
       return res.sendStatus(204)
