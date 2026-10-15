@@ -41,6 +41,7 @@ import {
 } from './routes/stripe-routes.js'
 import { createMetaRouter } from './routes/meta-routes.js'
 import { createPackRouter } from './routes/pack-routes.js'
+import { createProfileRouter } from './routes/profile-routes.js'
 
 const { Pool } = pg
 
@@ -272,6 +273,15 @@ app.use(
   createPackRouter({
     db,
     getAccountFromRequest
+  })
+)
+
+app.use(
+  '/api',
+  createProfileRouter({
+    db,
+    getAccountFromRequest,
+    ready: () => databaseSetup.isReady()
   })
 )
 
