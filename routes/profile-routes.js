@@ -1,8 +1,9 @@
 import { Router } from 'express'
+import { randomUUID } from 'node:crypto'
 import { validateProfileInput } from '../profile-validation.js'
 
 const readProfileSql = `
-  SELECT p.links, p.version, p.updated_at,
+  SELECT p.links, p.version, p.updated_at, p.public_id, p.published, p.published_at,
     COALESCE(
       (SELECT array_agg(pb.beat_id ORDER BY pb.position)
        FROM account_profile_beats pb
@@ -16,8 +17,18 @@ function toProfile(row) {
     beatIds: row?.beat_ids || [],
     links: row?.links || [],
     version: row?.version || 0,
-    updatedAt: row?.updated_at || null
+    updatedAt: row?.updated_at || null,
+    publicId: row?.public_id || null,
+    publicPath: row?.public_id ? '/p/' + row.public_id : null,
+    published: row?.published === true,
+    publishedAt: row?.published_at || null
   }
+}
+async function ensureProfile(client, userId) {
+  await client.query(`
+    INSERT INTO account_profiles (user_id, public_id)
+    VALUES ($1, $2) ON CONFLICT (user_id) DO NOTHING
+  `, [userId, randomUUID()])
 }
 export function createProfileRouter({ db, getAccountFromRequest, ready = () => true }) {
   const router = Router()
@@ -54,22 +65,16 @@ export function createProfileRouter({ db, getAccountFromRequest, ready = () => t
       client = await db.connect()
       await client.query('BEGIN')
       transaction = true
-      await client.query(`INSERT INTO account_profiles (user_id) VALUES ($1) ON CONFLICT (user_id) DO NOTHING`, [account.id])
+      await ensureProfile(client, account.id)
       const locked = await client.query(`SELECT version FROM account_profiles WHERE user_id = $1 FOR UPDATE`, [account.id])
       if (locked.rows[0].version !== input.version) {
-        await client.query('ROLLBACK')
-        transaction = false
+        await client.query('ROLLBACK'); transaction = false
         return res.status(409).json({ error: 'Your profile changed in another window. Reload the editor before saving.' })
       }
       if (input.beatIds.length) {
-        const owned = await client.query(`
-          SELECT id FROM account_beats
-          WHERE user_id = $1 AND id = ANY($2::uuid[])
-          FOR KEY SHARE
-        `, [account.id, input.beatIds])
+        const owned = await client.query(`SELECT id FROM account_beats WHERE user_id = $1 AND id = ANY($2::uuid[]) FOR KEY SHARE`, [account.id, input.beatIds])
         if (owned.rows.length !== input.beatIds.length) {
-          await client.query('ROLLBACK')
-          transaction = false
+          await client.query('ROLLBACK'); transaction = false
           return res.status(400).json({ error: 'One or more selected beats are unavailable in your Library. Reload the editor.' })
         }
       }
@@ -81,21 +86,52 @@ export function createProfileRouter({ db, getAccountFromRequest, ready = () => t
           FROM unnest($2::uuid[]) WITH ORDINALITY AS selected(beat_id, ordinality)
         `, [account.id, input.beatIds])
       }
-      await client.query(`
-        UPDATE account_profiles SET links = $2::jsonb, version = version + 1, updated_at = NOW()
-        WHERE user_id = $1
-      `, [account.id, JSON.stringify(input.links)])
+      await client.query(`UPDATE account_profiles SET links = $2::jsonb, version = version + 1, updated_at = NOW() WHERE user_id = $1`, [account.id, JSON.stringify(input.links)])
       const saved = await client.query(readProfileSql, [account.id])
-      await client.query('COMMIT')
-      transaction = false
+      await client.query('COMMIT'); transaction = false
       return res.json({ profile: toProfile(saved.rows[0]) })
     } catch (error) {
       if (client && transaction) await client.query('ROLLBACK').catch(() => {})
       console.error('Save profile error:', error)
       return res.status(500).json({ error: 'Unable to save your profile. Please try again.' })
-    } finally {
-      client?.release()
-    }
+    } finally { client?.release() }
+  })
+
+  // Publication changes are explicit and never part of the save endpoint.
+  router.post('/me/profile/publication', async (req, res) => {
+    let client
+    let transaction = false
+    try {
+      const account = await requireAccount(req, res)
+      if (!account) return
+      const { published, version } = req.body || {}
+      if (typeof published !== 'boolean' || !Number.isSafeInteger(version) || version < 0) {
+        return res.status(400).json({ error: 'A publication state and valid profile version are required.' })
+      }
+      client = await db.connect()
+      await client.query('BEGIN'); transaction = true
+      await ensureProfile(client, account.id)
+      const locked = await client.query(`SELECT version FROM account_profiles WHERE user_id = $1 FOR UPDATE`, [account.id])
+      if (locked.rows[0].version !== version) {
+        await client.query('ROLLBACK'); transaction = false
+        return res.status(409).json({ error: 'Your profile changed. Reload it before changing publication.' })
+      }
+      await client.query(`
+        UPDATE account_profiles
+        SET published = $2,
+            published_at = CASE WHEN $2 THEN COALESCE(published_at, NOW()) ELSE NULL END,
+            version = version + 1,
+            updated_at = NOW()
+        WHERE user_id = $1
+      `, [account.id, published])
+      const saved = await client.query(readProfileSql, [account.id])
+      await client.query('COMMIT'); transaction = false
+      return res.json({ profile: toProfile(saved.rows[0]) })
+    } catch (error) {
+      if (client && transaction) await client.query('ROLLBACK').catch(() => {})
+      console.error('Profile publication error:', error)
+      return res.status(500).json({ error: 'Unable to change profile publication.' })
+    } finally { client?.release() }
   })
   return router
 }
