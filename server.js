@@ -45,6 +45,9 @@ import { createProfileRouter } from './routes/profile-routes.js'
 import {
   createPublicProfileRouter
 } from './routes/public-profile-routes.js'
+import {
+  createHandleRouter
+} from './routes/handle-routes.js'
 
 const { Pool } = pg
 
@@ -282,6 +285,15 @@ app.use(
 app.use(
   '/api',
   createProfileRouter({
+    db,
+    getAccountFromRequest,
+    ready: () => databaseSetup.isReady()
+  })
+)
+
+app.use(
+  '/api',
+  createHandleRouter({
     db,
     getAccountFromRequest,
     ready: () => databaseSetup.isReady()
