@@ -1,5 +1,6 @@
 import { setupPacksSchema } from '../packs-schema.js'
 import { setupProfilesSchema } from '../profiles-schema.js'
+import { setupHandleSchema } from '../handle-schema.js'
 export function createDatabaseSetup({
   db,
   setupDesktopDatabase,
@@ -388,7 +389,8 @@ export function createDatabaseSetup({
     )
   `)
       
-       await setupDesktopDatabase(db)
+      await setupHandleSchema(db)
+await setupDesktopDatabase(db)
 await setupPacksSchema(db)
 await setupProfilesSchema(db)
 await setupPublicationDatabase(db)
