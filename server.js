@@ -42,6 +42,9 @@ import {
 import { createMetaRouter } from './routes/meta-routes.js'
 import { createPackRouter } from './routes/pack-routes.js'
 import { createProfileRouter } from './routes/profile-routes.js'
+import {
+  createPublicProfileRouter
+} from './routes/public-profile-routes.js'
 
 const { Pool } = pg
 
