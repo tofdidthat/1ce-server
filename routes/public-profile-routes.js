@@ -15,7 +15,7 @@ export function createPublicProfileRouter({ db, ready = () => true }) {
     if (!UUID.test(req.params.publicId)) return res.status(404).json({ error: 'Profile unavailable.' })
     try {
       const result = await db.query(`
-        SELECT u.name, u.picture, p.links, p.public_id,
+        SELECT u.handle, u.picture, p.links, p.public_id,
           COALESCE((
             SELECT jsonb_agg(jsonb_build_object(
               'id', b.id, 'title', b.title, 'duration', b.duration, 'createdAt', b.created_at
@@ -31,10 +31,16 @@ export function createPublicProfileRouter({ db, ready = () => true }) {
       `, [req.params.publicId])
       if (!result.rows.length) return res.status(404).json({ error: 'Profile unavailable.' })
       const row = result.rows[0]
-      return res.json({ profile: {
-        publicId: row.public_id, name: row.name || '1CE artist', picture: row.picture || null,
-        links: row.links || [], beats: row.beats || []
-      } })
+    return res.json({
+  profile: {
+    publicId: row.public_id,
+    handle: row.handle || null,
+    name: row.handle ? `@${row.handle}` : '1CE artist',
+    picture: row.picture || null,
+    links: row.links || [],
+    beats: row.beats || []
+  }
+})
     } catch (error) {
       console.error('Public profile read error:', error)
       return res.status(500).json({ error: 'Unable to load profile.' })
