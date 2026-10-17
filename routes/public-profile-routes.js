@@ -44,7 +44,42 @@ export function createPublicProfileRouter({ db, ready = () => true }) {
               WHERE pack.user_id = p.user_id
               GROUP BY beat.id, beat.title, beat.duration, beat.created_at
             ) beat
-          ), '[]'::jsonb) AS beats
+          ), '[]'::jsonb) AS beats,
+          COALESCE((
+            SELECT jsonb_agg(jsonb_build_object(
+              'id', pack.id,
+              'name', pack.name,
+              'createdAt', pack.created_at,
+              'beats', (
+                SELECT jsonb_agg(jsonb_build_object(
+                  'id', b.id,
+                  'title', b.title,
+                  'duration', b.duration,
+                  'createdAt', b.created_at
+                ) ORDER BY pb.position)
+                FROM account_pack_beats pb
+                JOIN account_beats b ON b.id = pb.beat_id
+                WHERE pb.pack_id = pack.id
+              )
+            ) ORDER BY pack.created_at DESC)
+            FROM account_packs pack
+            WHERE pack.user_id = p.user_id
+          ), '[]'::jsonb) AS packs,
+          COALESCE((
+            SELECT jsonb_agg(jsonb_build_object(
+              'id', beat.id,
+              'title', beat.title,
+              'duration', beat.duration,
+              'createdAt', beat.created_at
+            ) ORDER BY beat.created_at DESC)
+            FROM account_beats beat
+            WHERE beat.user_id = p.user_id
+              AND NOT EXISTS (
+                SELECT 1
+                FROM account_pack_beats pb
+                WHERE pb.beat_id = beat.id
+              )
+          ), '[]'::jsonb) AS singles
         FROM account_profiles p
         JOIN account_users u ON u.id = p.user_id
         WHERE p.public_id = $1 AND p.published = TRUE
@@ -52,6 +87,15 @@ export function createPublicProfileRouter({ db, ready = () => true }) {
       `, [req.params.publicId])
       if (!result.rows.length) return res.status(404).json({ error: 'Profile unavailable.' })
       const row = result.rows[0]
+      const packs = [
+        ...(row.packs || []),
+        ...(row.singles || []).map(beat => ({
+          id: 'single-' + beat.id,
+          name: beat.title,
+          createdAt: beat.createdAt,
+          beats: [beat]
+        }))
+      ]
       return res.json({
         profile: {
           publicId: row.public_id,
@@ -59,7 +103,8 @@ export function createPublicProfileRouter({ db, ready = () => true }) {
           name: row.handle ? `@${row.handle}` : '1CE artist',
           picture: row.picture || null,
           links: row.links || [],
-          beats: row.beats || []
+          beats: row.beats || [],
+          packs
         }
       })
     } catch (error) {
@@ -76,9 +121,7 @@ export function createPublicProfileRouter({ db, ready = () => true }) {
       const authorized = await client.query(`
         SELECT b.audio_size
         FROM account_profiles p
-        JOIN account_packs pack ON pack.user_id = p.user_id
-        JOIN account_pack_beats pb ON pb.pack_id = pack.id
-        JOIN account_beats b ON b.id = pb.beat_id
+        JOIN account_beats b ON b.user_id = p.user_id
         WHERE p.public_id = $1 AND p.published = TRUE AND b.id = $2
         LIMIT 1
       `, [req.params.publicId, req.params.beatId])
