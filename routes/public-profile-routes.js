@@ -18,11 +18,32 @@ export function createPublicProfileRouter({ db, ready = () => true }) {
         SELECT u.handle, u.picture, p.links, p.public_id,
           COALESCE((
             SELECT jsonb_agg(jsonb_build_object(
-              'id', b.id, 'title', b.title, 'duration', b.duration, 'createdAt', b.created_at
-            ) ORDER BY pb.position)
-            FROM account_profile_beats pb
-            JOIN account_beats b ON b.id = pb.beat_id AND b.user_id = p.user_id
-            WHERE pb.user_id = p.user_id
+              'id', beat.id,
+              'title', beat.title,
+              'duration', beat.duration,
+              'createdAt', beat.created_at
+            ) ORDER BY pack_rank, beat_position)
+            FROM (
+              SELECT
+                beat.id,
+                beat.title,
+                beat.duration,
+                beat.created_at,
+                MIN(pack.created_at) AS pack_created_at,
+                MIN(pack.id) AS pack_id,
+                MIN(pack_beat.position) AS beat_position,
+                ROW_NUMBER() OVER (
+                  PARTITION BY beat.id
+                  ORDER BY MIN(pack.created_at), MIN(pack.id), MIN(pack_beat.position)
+                ) AS pack_rank
+              FROM account_packs pack
+              JOIN account_pack_beats pack_beat
+                ON pack_beat.pack_id = pack.id
+              JOIN account_beats beat
+                ON beat.id = pack_beat.beat_id
+              WHERE pack.user_id = p.user_id
+              GROUP BY beat.id, beat.title, beat.duration, beat.created_at
+            ) beat
           ), '[]'::jsonb) AS beats
         FROM account_profiles p
         JOIN account_users u ON u.id = p.user_id
@@ -31,16 +52,16 @@ export function createPublicProfileRouter({ db, ready = () => true }) {
       `, [req.params.publicId])
       if (!result.rows.length) return res.status(404).json({ error: 'Profile unavailable.' })
       const row = result.rows[0]
-    return res.json({
-  profile: {
-    publicId: row.public_id,
-    handle: row.handle || null,
-    name: row.handle ? `@${row.handle}` : '1CE artist',
-    picture: row.picture || null,
-    links: row.links || [],
-    beats: row.beats || []
-  }
-})
+      return res.json({
+        profile: {
+          publicId: row.public_id,
+          handle: row.handle || null,
+          name: row.handle ? `@${row.handle}` : '1CE artist',
+          picture: row.picture || null,
+          links: row.links || [],
+          beats: row.beats || []
+        }
+      })
     } catch (error) {
       console.error('Public profile read error:', error)
       return res.status(500).json({ error: 'Unable to load profile.' })
@@ -55,8 +76,9 @@ export function createPublicProfileRouter({ db, ready = () => true }) {
       const authorized = await client.query(`
         SELECT b.audio_size
         FROM account_profiles p
-        JOIN account_profile_beats pb ON pb.user_id = p.user_id
-        JOIN account_beats b ON b.id = pb.beat_id AND b.user_id = p.user_id
+        JOIN account_packs pack ON pack.user_id = p.user_id
+        JOIN account_pack_beats pb ON pb.pack_id = pack.id
+        JOIN account_beats b ON b.id = pb.beat_id
         WHERE p.public_id = $1 AND p.published = TRUE AND b.id = $2
         LIMIT 1
       `, [req.params.publicId, req.params.beatId])
@@ -81,7 +103,9 @@ export function createPublicProfileRouter({ db, ready = () => true }) {
         const part = data.subarray(Math.max(0, start - offset), Math.min(data.length, end - offset + 1))
         if (!res.write(part)) await new Promise(resolve => {
           const finish = () => { res.off('drain', finish); res.off('close', finish); resolve() }
-          res.once('drain', finish); res.once('close', finish)
+          res.once('drain', finish)
+          res.once('close', finish)
+          resolve()
         })
       }
       res.end()

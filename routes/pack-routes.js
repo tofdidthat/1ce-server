@@ -452,6 +452,8 @@ export function createPackRouter({
   router.delete(
     '/me/packs/:packId/beats/:beatId',
     async (req, res) => {
+      const client = await db.connect()
+
       try {
         const account =
           await requireAccount(req, res)
@@ -481,23 +483,49 @@ export function createPackRouter({
           })
         }
 
-        const result = await db.query(
+        await client.query('BEGIN')
+
+        const relation = await client.query(
           `
-            DELETE FROM account_pack_beats
+            SELECT beat_id
+            FROM account_pack_beats
             WHERE pack_id = $1
               AND beat_id = $2
-            RETURNING beat_id
+            FOR UPDATE
           `,
           [packId, beatId]
         )
 
-        if (!result.rows.length) {
+        if (!relation.rows.length) {
+          await client.query('ROLLBACK')
+
           return res.status(404).json({
             error: 'Beat not found in pack.'
           })
         }
 
-        await db.query(
+        // Removing a beat from a pack permanently deletes it from the
+        // backend. Cascading foreign keys remove its audio, stems and any
+        // remaining pack/profile associations.
+        const deleted = await client.query(
+          `
+            DELETE FROM account_beats
+            WHERE id = $1
+              AND user_id = $2
+            RETURNING id
+          `,
+          [beatId, account.id]
+        )
+
+        if (!deleted.rows.length) {
+          await client.query('ROLLBACK')
+
+          return res.status(404).json({
+            error: 'Beat not found.'
+          })
+        }
+
+        await client.query(
           `
             UPDATE account_packs
             SET updated_at = NOW()
@@ -506,10 +534,14 @@ export function createPackRouter({
           [packId]
         )
 
+        await client.query('COMMIT')
+
         return res.json({
           ok: true
         })
       } catch (error) {
+        await client.query('ROLLBACK').catch(() => {})
+
         console.error(
           'Remove beat from pack error:',
           error
@@ -519,6 +551,8 @@ export function createPackRouter({
           error:
             'Unable to remove beat from pack.'
         })
+      } finally {
+        client.release()
       }
     }
   )
