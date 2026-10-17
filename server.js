@@ -20,6 +20,7 @@ import { retrieveStripePrice } from './stripe.js'
 import { createDatabaseSetup } from './database/setup.js'
 import { createRenderRuntime } from './render-runtime.js'
 import { createAccountService } from './services/account-service.js'
+import { createAvatarStorage } from './services/avatar-storage.js'
 import { createInternalRequestValidator } from './security/internal-request.js'
 import { createLegacyRenderVisibilityMiddleware } from './middleware/render-visibility.js'
 import { createHttpSecurityMiddleware } from './middleware/http-security.js'
@@ -48,6 +49,9 @@ import {
 import {
   createHandleRouter
 } from './routes/handle-routes.js'
+import {
+  createAvatarRouter
+} from './routes/avatar-routes.js'
 
 const { Pool } = pg
 
@@ -81,9 +85,9 @@ app.use(express.json({
   verify: (req, res, buf) => {
     if (
       req.originalUrl ===
-      '/discord/interactions' ||
+        '/discord/interactions' ||
       req.originalUrl ===
-      '/stripe/webhook'
+        '/stripe/webhook'
     ) {
       req.rawBody = buf
     }
@@ -125,6 +129,8 @@ const {
 
 const isValidInternalRequest =
   createInternalRequestValidator()
+
+const avatarStorage = createAvatarStorage()
 
 const publicationService = createPublicationService({
   db,
@@ -302,6 +308,16 @@ app.use(
 
 app.use(
   '/api',
+  createAvatarRouter({
+    db,
+    getAccountFromRequest,
+    avatarStorage,
+    ready: () => databaseSetup.isReady()
+  })
+)
+
+app.use(
+  '/api',
   createBeatUploadRouter({
     db,
     getAccountFromRequest,
@@ -327,7 +343,7 @@ if (
     '0.0.0.0',
     () => {
       console.log(
-        `Render server listening on port ${port}`
+        'Render server listening on port ' + port
       )
     }
   )

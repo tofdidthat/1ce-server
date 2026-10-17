@@ -29,9 +29,15 @@ export function createDatabaseSetup({
       email_verified BOOLEAN NOT NULL DEFAULT FALSE,
       name TEXT,
       picture TEXT,
+      custom_picture TEXT,
       created_at TIMESTAMPTZ DEFAULT NOW(),
       updated_at TIMESTAMPTZ DEFAULT NOW()
     )
+  `)
+  
+  await db.query(`
+    ALTER TABLE account_users
+    ADD COLUMN IF NOT EXISTS custom_picture TEXT
   `)
   
   // Prepara contas existentes para suportar Google OU Email/Senha.
@@ -146,7 +152,7 @@ export function createDatabaseSetup({
   
   await db.query(`
     CREATE INDEX IF NOT EXISTS account_login_attempts_pair_time_idx
-    ON account_login_attempts(email_hash, ip_hash, created_at DESC)
+    ON account_login_attempts(email_hash, ip_hash)
   `)
   
   await db.query(`
@@ -206,9 +212,7 @@ export function createDatabaseSetup({
   
       scope TEXT,
       token_type TEXT DEFAULT 'Bearer',
-  
       expires_at BIGINT,
-  
       created_at TIMESTAMPTZ DEFAULT NOW(),
       updated_at TIMESTAMPTZ DEFAULT NOW()
     )
@@ -223,22 +227,15 @@ export function createDatabaseSetup({
   await db.query(`
     CREATE TABLE IF NOT EXISTS tiktok_connections (
       id SERIAL PRIMARY KEY,
-  
       user_id INTEGER NOT NULL UNIQUE
         REFERENCES account_users(id)
         ON DELETE CASCADE,
-  
       open_id TEXT,
-  
       access_token TEXT NOT NULL,
       refresh_token TEXT,
-  
       scope TEXT,
       token_type TEXT DEFAULT 'Bearer',
-  
       expires_at BIGINT,
-      refresh_expires_at BIGINT,
-  
       created_at TIMESTAMPTZ DEFAULT NOW(),
       updated_at TIMESTAMPTZ DEFAULT NOW()
     )
@@ -250,25 +247,19 @@ export function createDatabaseSetup({
     ON tiktok_connections(user_id)
   `)
   
-  
   await db.query(`
     CREATE TABLE IF NOT EXISTS instagram_connections (
       id SERIAL PRIMARY KEY,
-  
       user_id INTEGER NOT NULL UNIQUE
         REFERENCES account_users(id)
         ON DELETE CASCADE,
-  
       instagram_user_id TEXT,
       page_id TEXT,
       page_name TEXT,
       username TEXT,
-  
       access_token TEXT NOT NULL,
       token_type TEXT DEFAULT 'Bearer',
-  
       expires_at BIGINT,
-  
       created_at TIMESTAMPTZ DEFAULT NOW(),
       updated_at TIMESTAMPTZ DEFAULT NOW()
     )
@@ -315,37 +306,36 @@ export function createDatabaseSetup({
     ON account_sessions(expires_at)
   `)
   
+      await db.query(`
+        CREATE TABLE IF NOT EXISTS stripe_subscriptions (
+          id SERIAL PRIMARY KEY,
+          user_id INTEGER NOT NULL UNIQUE
+            REFERENCES account_users(id)
+            ON DELETE CASCADE,
+          stripe_customer_id TEXT,
+          stripe_subscription_id TEXT UNIQUE,
+          status TEXT NOT NULL DEFAULT 'inactive',
+          price_id TEXT,
+          current_period_end TIMESTAMPTZ,
+          cancel_at_period_end BOOLEAN NOT NULL DEFAULT FALSE,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+      `)
+  
+      await db.query(`
+        CREATE INDEX IF NOT EXISTS stripe_subscriptions_customer_idx
+        ON stripe_subscriptions(stripe_customer_id)
+      `)
+  
+      await db.query(`
+        CREATE TABLE IF NOT EXISTS stripe_webhook_events (
+          event_id TEXT PRIMARY KEY,
+          event_type TEXT,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+      `)
       
-  await db.query(`
-    CREATE TABLE IF NOT EXISTS stripe_subscriptions (
-      id SERIAL PRIMARY KEY,
-      user_id INTEGER NOT NULL UNIQUE
-        REFERENCES account_users(id)
-        ON DELETE CASCADE,
-      stripe_customer_id TEXT,
-      stripe_subscription_id TEXT UNIQUE,
-      status TEXT NOT NULL DEFAULT 'inactive',
-      price_id TEXT,
-      current_period_end TIMESTAMPTZ,
-      cancel_at_period_end BOOLEAN NOT NULL DEFAULT FALSE,
-      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    )
-  `)
-  
-  await db.query(`
-    CREATE INDEX IF NOT EXISTS stripe_subscriptions_customer_idx
-    ON stripe_subscriptions(stripe_customer_id)
-  `)
-  
-  await db.query(`
-    CREATE TABLE IF NOT EXISTS stripe_webhook_events (
-      event_id TEXT PRIMARY KEY,
-      event_type TEXT,
-      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    )
-  `)
-  
       await db.query(`
         CREATE TABLE IF NOT EXISTS telegram_connections (
           id SERIAL PRIMARY KEY,
@@ -372,7 +362,6 @@ export function createDatabaseSetup({
       id SERIAL PRIMARY KEY,
       client_id TEXT NOT NULL,
       guild_id TEXT NOT NULL,
-      guild_name TEXT,
       channel_id TEXT NOT NULL,
       channel_name TEXT,
       created_at TIMESTAMPTZ DEFAULT NOW(),
@@ -414,17 +403,17 @@ await setupPublicationDatabase(db)
 
   async function initializeDatabaseWithRetry() {
     let attempt = 0
-  
+
     while (!ready) {
       attempt += 1
-  
+
       try {
         await setupDatabase()
-  
+
         console.log(
           `Database ready after ${attempt} attempt(s).`
         )
-  
+
         return
       } catch (error) {
         const delayMs =
@@ -432,11 +421,12 @@ await setupPublicationDatabase(db)
             30000,
             2000 * (2 ** Math.min(attempt - 1, 4))
           )
-  
+
         console.error(
-          `Database initialization attempt ${attempt} failed. Retrying in ${delayMs}ms.`
+          'Database initialization attempt failed. Retrying.',
+          error
         )
-  
+
         await sleep(delayMs)
       }
     }
