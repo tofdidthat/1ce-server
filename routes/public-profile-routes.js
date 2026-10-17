@@ -42,6 +42,8 @@ export function createPublicProfileRouter({ db, ready = () => true }) {
               JOIN account_beats beat
                 ON beat.id = pack_beat.beat_id
               WHERE pack.user_id = p.user_id
+                AND NOT pack.profile_hidden
+                AND NOT beat.profile_hidden
               GROUP BY beat.id, beat.title, beat.duration, beat.created_at
             ) beat
           ), '[]'::jsonb) AS beats,
@@ -60,10 +62,12 @@ export function createPublicProfileRouter({ db, ready = () => true }) {
                 FROM account_pack_beats pb
                 JOIN account_beats b ON b.id = pb.beat_id
                 WHERE pb.pack_id = pack.id
+                  AND NOT b.profile_hidden
               )
             ) ORDER BY pack.created_at DESC)
             FROM account_packs pack
             WHERE pack.user_id = p.user_id
+              AND NOT pack.profile_hidden
           ), '[]'::jsonb) AS packs,
           COALESCE((
             SELECT jsonb_agg(jsonb_build_object(
@@ -74,6 +78,7 @@ export function createPublicProfileRouter({ db, ready = () => true }) {
             ) ORDER BY beat.created_at DESC)
             FROM account_beats beat
             WHERE beat.user_id = p.user_id
+              AND NOT beat.profile_hidden
               AND NOT EXISTS (
                 SELECT 1
                 FROM account_pack_beats pb

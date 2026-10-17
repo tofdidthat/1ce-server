@@ -9,7 +9,8 @@ export async function setupBeatLibrary(db){
  await db.query('ALTER TABLE account_beats ADD COLUMN IF NOT EXISTS stems_name TEXT')
  await db.query('ALTER TABLE account_beats ADD COLUMN IF NOT EXISTS stems_size INTEGER')
  await db.query('ALTER TABLE account_beats ADD COLUMN IF NOT EXISTS stems_hash TEXT')
- await db.query('CREATE TABLE IF NOT EXISTS account_beat_stems(beat_id UUID NOT NULL REFERENCES account_beats(id) ON DELETE CASCADE,chunk_index INTEGER NOT NULL,data BYTEA NOT NULL,PRIMARY KEY(beat_id,chunk_index))')
+ await db.query('ALTER TABLE account_beats ADD COLUMN IF NOT EXISTS profile_hidden BOOLEAN NOT NULL DEFAULT FALSE')
+ await db.query(`CREATE TABLE IF NOT EXISTS account_beat_stems(beat_id UUID NOT NULL REFERENCES account_beats(id) ON DELETE CASCADE,chunk_index INTEGER NOT NULL,data BYTEA NOT NULL,PRIMARY KEY(beat_id,chunk_index))`)
  await db.query('CREATE INDEX IF NOT EXISTS account_beats_user_date_idx ON account_beats(user_id,created_at DESC)')
 }
 export async function saveDesktopBeat(db,userId,file,duration,stems){
@@ -25,7 +26,6 @@ export async function saveDesktopBeat(db,userId,file,duration,stems){
   else {const existing=await client.query('SELECT id,title,created_at,duration FROM account_beats WHERE user_id=$1 AND audio_hash=$2',[userId,audioHash]);row.rows=existing.rows}
   if(stems){
    const beat=row.rows[0]
-   // Serialise replacement for the same deduplicated beat; a later audio-only upload retains stems.
    await client.query('SELECT id FROM account_beats WHERE id=$1 AND user_id=$2 FOR UPDATE',[beat.id,userId])
    const hash=crypto.createHash('sha256')
    let index=0
@@ -51,11 +51,10 @@ export function audioRange(header,size){
  return Number.isSafeInteger(start)&&Number.isSafeInteger(end)&&start>=0&&start<size&&end>=start?{start,end,partial:true}:null
 }
 export function registerBeatLibrary(router,{db,account}){
- router.get('/beats',account,async(req,res,next)=>{try{const result=await db.query('SELECT id,title,created_at,duration,audio_size,stems_name,stems_size FROM account_beats WHERE user_id=$1 ORDER BY created_at DESC,id',[req.account.id]);res.json({beats:result.rows})}catch(error){next(error)}})
+ router.get('/beats',account,async(req,res,next)=>{try{const result=await db.query('SELECT id,title,created_at,duration,audio_size,stems_name,stems_size,profile_hidden FROM account_beats WHERE user_id=$1 ORDER BY created_at DESC,id',[req.account.id]);res.json({beats:result.rows})}catch(error){next(error)}})
  router.delete('/beats/:id',account,async(req,res,next)=>{
   try{
    if(!/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(req.params.id))return res.sendStatus(404)
-   // Foreign keys remove the corresponding audio and stems in the same statement.
    const result=await db.query('DELETE FROM account_beats WHERE id=$1 AND user_id=$2 RETURNING id',[req.params.id,req.account.id])
    res.sendStatus(result.rowCount?204:404)
   }catch(error){next(error)}
@@ -64,8 +63,13 @@ export function registerBeatLibrary(router,{db,account}){
   try{
    if(!/^[a-f0-9-]{36}$/i.test(req.params.id))return res.sendStatus(404)
    const title=typeof req.body?.title==='string'?req.body.title.trim():''
-   if(!title || title.length>100)return res.status(400).json({error:'A title between 1 and 100 characters is required.'})
-   const result=await db.query('UPDATE account_beats SET title=$1 WHERE id=$2 AND user_id=$3 RETURNING id,title,created_at,duration',[title,req.params.id,req.account.id])
+   const profileHidden=typeof req.body?.profileHidden==='boolean'?req.body.profileHidden:null
+   if(!title && profileHidden===null)return res.status(400).json({error:'Provide a title or profileHidden.'})
+   if(title && title.length>100)return res.status(400).json({error:'A title between 1 and 100 characters is required.'})
+   const sets=[];const values=[req.params.id,req.account.id]
+   if(title){sets.push('title=$'+(values.length+1));values.push(title)}
+   if(profileHidden!==null){sets.push('profile_hidden=$'+(values.length+1));values.push(profileHidden)}
+   const result=await db.query('UPDATE account_beats SET '+sets.join(',')+' WHERE id=$1 AND user_id=$2 RETURNING id,title,created_at,duration,profile_hidden',values)
    if(!result.rowCount)return res.sendStatus(404)
    res.json({beat:result.rows[0]})
   }catch(error){next(error)}
@@ -139,4 +143,3 @@ export function registerBeatLibrary(router,{db,account}){
   }
  }
 }
-

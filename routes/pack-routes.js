@@ -4,6 +4,16 @@ import crypto from 'node:crypto'
 const UUID_REGEX =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
+let packSchemaReady = null
+
+function ensurePackSchema(db) {
+  packSchemaReady ||= db.query(
+    'ALTER TABLE account_packs ADD COLUMN IF NOT EXISTS profile_hidden BOOLEAN NOT NULL DEFAULT FALSE'
+  )
+
+  return packSchemaReady
+}
+
 function isValidUuid(value) {
   return typeof value === 'string' &&
     UUID_REGEX.test(value)
@@ -67,11 +77,14 @@ export function createPackRouter({
 
       if (!account) return
 
+      await ensurePackSchema(db)
+
       const result = await db.query(
   `
     SELECT
       p.id,
       p.name,
+      p.profile_hidden,
       p.created_at,
       p.updated_at,
 
@@ -100,6 +113,7 @@ export function createPackRouter({
     GROUP BY
       p.id,
       p.name,
+      p.profile_hidden,
       p.created_at,
       p.updated_at
 
@@ -243,31 +257,65 @@ export function createPackRouter({
           })
         }
 
-        const name = getPackName(req.body?.name)
+        const hasName =
+          typeof req.body?.name === 'string'
 
-        if (!name) {
+        const name = hasName
+          ? getPackName(req.body.name)
+          : null
+
+        const profileHidden =
+          typeof req.body?.profileHidden === 'boolean'
+            ? req.body.profileHidden
+            : null
+
+        if (!name && profileHidden === null) {
+          return res.status(400).json({
+            error:
+              'Provide a pack name or profileHidden.'
+          })
+        }
+
+        if (hasName && !name) {
           return res.status(400).json({
             error:
               'Pack name must contain between 1 and 100 characters.'
           })
         }
 
+        await ensurePackSchema(db)
+
+        const sets = []
+        const values = [packId, account.id]
+
+        if (name) {
+          sets.push('name = $' + (values.length + 1))
+          values.push(name)
+        }
+
+        if (profileHidden !== null) {
+          sets.push('profile_hidden = $' + (values.length + 1))
+          values.push(profileHidden)
+        }
+
+        sets.push('updated_at = NOW()')
+
         const result = await db.query(
           `
             UPDATE account_packs
             SET
-              name = $1,
-              updated_at = NOW()
-            WHERE id = $2
-              AND user_id = $3
+              ${sets.join(',\n              ')}
+            WHERE id = $1
+              AND user_id = $2
             RETURNING
               id,
               user_id,
               name,
+              profile_hidden,
               created_at,
               updated_at
           `,
-          [name, packId, account.id]
+          values
         )
 
         if (!result.rows.length) {
@@ -285,6 +333,165 @@ export function createPackRouter({
         return res.status(500).json({
           error: 'Unable to update pack.'
         })
+      }
+    }
+  )
+
+  router.get(
+    '/me/packs/:packId/export',
+    async (req, res) => {
+      try {
+        const account =
+          await requireAccount(req, res)
+
+        if (!account) return
+
+        const packId = req.params.packId
+
+        if (!isValidUuid(packId)) {
+          return res.status(404).json({
+            error: 'Pack not found.'
+          })
+        }
+
+        const pack = await getOwnedPack(
+          packId,
+          account.id
+        )
+
+        if (!pack) {
+          return res.status(404).json({
+            error: 'Pack not found.'
+          })
+        }
+
+        const beats = await db.query(
+          `
+            SELECT
+              b.id,
+              b.title
+            FROM account_pack_beats pb
+            JOIN account_beats b
+              ON b.id = pb.beat_id
+            WHERE pb.pack_id = $1
+            ORDER BY
+              pb.position ASC,
+              pb.created_at ASC,
+              pb.beat_id ASC
+          `,
+          [packId]
+        )
+
+        if (!beats.rows.length) {
+          return res.status(404).json({
+            error: 'This pack has no beats to export.'
+          })
+        }
+
+        let archiver
+
+        try {
+          archiver = (await import('archiver')).default
+        } catch {
+          return res.status(501).json({
+            error: 'Pack export is unavailable.'
+          })
+        }
+
+        const { PassThrough } = await import('node:stream')
+        const { once } = await import('node:events')
+
+        const safeName =
+          String(pack.name || 'pack')
+            .replace(/[\\/:*?"<>|\r\n]+/g, '-')
+            .slice(0, 80) || 'pack'
+
+        res.setHeader('Content-Type', 'application/zip')
+        res.setHeader(
+          'Content-Disposition',
+          'attachment; filename="' +
+            encodeURIComponent(safeName) +
+            '.zip"'
+        )
+
+        const archive = archiver('zip', {
+          zlib: { level: 9 }
+        })
+
+        archive.on('error', error => {
+          console.error('Pack export error:', error)
+
+          if (!res.headersSent) {
+            res.status(500).end()
+          } else {
+            res.end()
+          }
+        })
+
+        archive.pipe(res)
+
+        const used = new Set()
+
+        for (const beat of beats.rows) {
+          let name =
+            String(beat.title || 'beat')
+              .replace(/[\\/:*?"<>|\r\n]+/g, '-')
+              .slice(0, 80) || 'beat'
+
+          let suffix = 1
+
+          while (used.has(name + '.mp3')) {
+            name = name + ' (' + (++suffix) + ')'
+          }
+
+          used.add(name + '.mp3')
+
+          const pass = new PassThrough()
+
+          archive.append(pass, {
+            name: name + '.mp3'
+          })
+
+          const client = await db.connect()
+
+          try {
+            for (
+              let index = 0;
+              ;
+              index++
+            ) {
+              const chunk = await client.query(
+                'SELECT data FROM account_beat_audio WHERE beat_id = $1 AND chunk_index = $2',
+                [beat.id, index]
+              )
+
+              if (!chunk.rows.length) {
+                break
+              }
+
+              const bytes = Buffer.from(chunk.rows[0].data)
+
+              if (!pass.write(bytes)) {
+                await once(pass, 'drain')
+              }
+            }
+          } finally {
+            client.release()
+            pass.end()
+          }
+        }
+
+        await archive.finalize()
+      } catch (error) {
+        console.error('Pack export error:', error)
+
+        if (!res.headersSent) {
+          return res.status(500).json({
+            error: 'Unable to export pack.'
+          })
+        }
+
+        res.end()
       }
     }
   )
@@ -504,9 +711,6 @@ export function createPackRouter({
           })
         }
 
-        // Removing a beat from a pack permanently deletes it from the
-        // backend. Cascading foreign keys remove its audio, stems and any
-        // remaining pack/profile associations.
         const deleted = await client.query(
           `
             DELETE FROM account_beats
