@@ -2,6 +2,7 @@ import crypto from 'node:crypto'
 import fs from 'node:fs'
 import multer from 'multer'
 import {validateStemsZip} from './stems-zip.js'
+import { coverUrlFromKey } from './services/cover-url.js'
 const chunkSize=1024*1024
 export async function setupBeatLibrary(db){
  await db.query(`CREATE TABLE IF NOT EXISTS account_beats(id UUID PRIMARY KEY,user_id INTEGER NOT NULL REFERENCES account_users(id) ON DELETE CASCADE,title TEXT NOT NULL,audio_hash TEXT NOT NULL,audio_size INTEGER NOT NULL,duration DOUBLE PRECISION,created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),UNIQUE(user_id,audio_hash))`)
@@ -51,8 +52,43 @@ export function audioRange(header,size){
  return Number.isSafeInteger(start)&&Number.isSafeInteger(end)&&start>=0&&start<size&&end>=start?{start,end,partial:true}:null
 }
 export function registerBeatLibrary(router,{db,account}){
- router.get('/beats',account,async(req,res,next)=>{try{const result=await db.query('SELECT id,title,created_at,duration,audio_size,stems_name,stems_size,profile_hidden FROM account_beats WHERE user_id=$1 ORDER BY created_at DESC,id',[req.account.id]);res.json({beats:result.rows})}catch(error){next(error)}})
- router.delete('/beats/:id',account,async(req,res,next)=>{
+router.get('/beats', account, async (req, res, next) => {
+  try {
+    const result = await db.query(
+      `
+        SELECT
+          id,
+          title,
+          created_at,
+          duration,
+          audio_size,
+          stems_name,
+          stems_size,
+          profile_hidden,
+          cover_key
+        FROM account_beats
+        WHERE user_id = $1
+        ORDER BY created_at DESC, id
+      `,
+      [req.account.id]
+    )
+
+    const beats = result.rows.map(row => {
+      const { cover_key, ...beat } = row
+
+      return {
+        ...beat,
+        cover_url: coverUrlFromKey(cover_key)
+      }
+    })
+
+    res.setHeader('Cache-Control', 'no-store')
+
+    return res.json({ beats })
+  } catch (error) {
+    next(error)
+  }
+}) router.delete('/beats/:id',account,async(req,res,next)=>{
   try{
    if(!/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(req.params.id))return res.sendStatus(404)
    const result=await db.query('DELETE FROM account_beats WHERE id=$1 AND user_id=$2 RETURNING id',[req.params.id,req.account.id])
