@@ -88,8 +88,9 @@ router.get('/beats', account, async (req, res, next) => {
   } catch (error) {
     next(error)
   }
-}) router.delete('/beats/:id',account,async(req,res,next)=>{
-  try{
+})
+
+router.delete('/beats/:id', account, async (req, res, next) => {  try{
    if(!/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(req.params.id))return res.sendStatus(404)
    const result=await db.query('DELETE FROM account_beats WHERE id=$1 AND user_id=$2 RETURNING id',[req.params.id,req.account.id])
    res.sendStatus(result.rowCount?204:404)
