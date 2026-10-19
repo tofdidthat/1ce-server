@@ -33,8 +33,7 @@ export function createUploadRouter({
   const router = Router()
 const limits = createUploadLimits()
   
-  router.use((req, res, next) => {
-    res.setHeader('Cache-Control', 'no-store')
+router.use('/me/uploads', (req, res, next) => {    res.setHeader('Cache-Control', 'no-store')
 
     if (!ready()) {
       return res.status(503).json({
