@@ -1,6 +1,6 @@
 import { Router } from 'express'
 import crypto from 'node:crypto'
-
+import { coverUrlFromKey } from '../services/cover-url.js'
 const UUID_REGEX =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
@@ -82,11 +82,12 @@ export function createPackRouter({
       const result = await db.query(
   `
     SELECT
-      p.id,
-      p.name,
-      p.profile_hidden,
-      p.created_at,
-      p.updated_at,
+  p.id,
+  p.name,
+  p.cover_key,
+  p.profile_hidden,
+  p.created_at,
+  p.updated_at,
 
       COUNT(pb.beat_id)::int AS beat_count,
 
@@ -113,6 +114,7 @@ export function createPackRouter({
     GROUP BY
       p.id,
       p.name,
+        p.cover_key,
       p.profile_hidden,
       p.created_at,
       p.updated_at
@@ -124,9 +126,18 @@ export function createPackRouter({
   [account.id]
 )
 
-      return res.json({
-        packs: result.rows
-      })
+     const packs = result.rows.map(row => {
+  const { cover_key, ...pack } = row
+
+  return {
+    ...pack,
+    cover_url: coverUrlFromKey(cover_key)
+  }
+})
+
+res.setHeader('Cache-Control', 'no-store')
+
+return res.json({ packs })
     } catch (error) {
       console.error('List packs error:', error)
 
