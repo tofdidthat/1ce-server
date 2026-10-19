@@ -6,6 +6,7 @@ import {
   validateCoverDeclaration,
   prepareCover
 } from '../services/cover-image.js'
+import { createUploadLimits } from '../services/upload-limits.js'
 const UUID_REGEX =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
@@ -30,7 +31,8 @@ export function createUploadRouter({
   ready = () => false
 }) {
   const router = Router()
-
+const limits = createUploadLimits()
+  
   router.use((req, res, next) => {
     res.setHeader('Cache-Control', 'no-store')
 
@@ -55,7 +57,19 @@ export function createUploadRouter({
           error: 'Sign in again to upload a cover.'
         })
       }
+const rate = limits.consume(
+  user.id,
+  'create',
+  10
+)
 
+if (!rate.allowed) {
+  res.setHeader('Retry-After', String(rate.retryAfter))
+
+  return res.status(429).json({
+    error: 'Too many upload requests. Try again shortly.'
+  })
+}
       const {
         kind,
         targetId,
@@ -240,6 +254,7 @@ export function createUploadRouter({
     let transactionOpen = false
     let publishedKey = null
     let commitAttempted = false
+    let releaseProcessing = null
 
     try {
       const user = await getAccountFromRequest(req)
@@ -249,7 +264,19 @@ export function createUploadRouter({
           error: 'Sign in again to complete this upload.'
         })
       }
+const rate = limits.consume(
+  user.id,
+  'complete',
+  20
+)
 
+if (!rate.allowed) {
+  res.setHeader('Retry-After', String(rate.retryAfter))
+
+  return res.status(429).json({
+    error: 'Too many completion requests. Try again shortly.'
+  })
+}
       const { uploadId } = req.params
 
       if (!validUuid(uploadId)) {
@@ -257,7 +284,15 @@ export function createUploadRouter({
           error: 'Invalid upload ID.'
         })
       }
+releaseProcessing = limits.acquire()
 
+if (!releaseProcessing) {
+  res.setHeader('Retry-After', '5')
+
+  return res.status(503).json({
+    error: 'Image processing is busy. Try again shortly.'
+  })
+}
       client = await db.connect()
       await client.query('BEGIN')
       transactionOpen = true
@@ -476,9 +511,13 @@ export function createUploadRouter({
       return res.status(500).json({
         error: 'Unable to complete this upload. Try again.'
       })
-    } finally {
-      client?.release()
-    }
+ } finally {
+  try {
+    client?.release()
+  } finally {
+    releaseProcessing?.()
+  }
+}
   })
   
   return router
