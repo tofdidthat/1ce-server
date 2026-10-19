@@ -52,7 +52,8 @@ import {
 import {
   createAvatarRouter
 } from './routes/avatar-routes.js'
-
+import { createUploadStorage } from './services/upload-storage.js'
+import { createUploadRouter } from './routes/upload-routes.js'
 const { Pool } = pg
 
 const db = new Pool({
@@ -131,7 +132,7 @@ const isValidInternalRequest =
   createInternalRequestValidator()
 
 const avatarStorage = createAvatarStorage()
-
+const uploadStorage = createUploadStorage()
 const publicationService = createPublicationService({
   db,
   renders,
@@ -315,7 +316,15 @@ app.use(
     ready: () => databaseSetup.isReady()
   })
 )
-
+app.use(
+  '/api',
+  createUploadRouter({
+    db,
+    getAccountFromRequest,
+    uploadStorage,
+    ready: () => databaseSetup.isReady()
+  })
+)
 app.use(
   '/api',
   createBeatUploadRouter({
