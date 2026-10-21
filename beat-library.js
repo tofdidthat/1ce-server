@@ -28,7 +28,7 @@ export async function saveDesktopBeat(
   options = {}
 ) {
   const libraryVisible = options.libraryVisible !== false
-   const digest=crypto.createHash('sha256')
+  const digest=crypto.createHash('sha256')
  for await(const chunk of fs.createReadStream(file.path))digest.update(chunk)
  const audioHash=digest.digest('hex')
  const title=String(file.originalname || 'Untitled beat').split(/[\\/]/).pop().replace(/\.mp3$/i,'').trim().slice(0,100) || 'Untitled beat'
