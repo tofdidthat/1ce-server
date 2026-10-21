@@ -11,20 +11,120 @@ export async function setupBeatLibrary(db){
  await db.query('ALTER TABLE account_beats ADD COLUMN IF NOT EXISTS stems_size INTEGER')
  await db.query('ALTER TABLE account_beats ADD COLUMN IF NOT EXISTS stems_hash TEXT')
  await db.query('ALTER TABLE account_beats ADD COLUMN IF NOT EXISTS profile_hidden BOOLEAN NOT NULL DEFAULT FALSE')
+ await db.query(`
+  ALTER TABLE account_beats
+  ADD COLUMN IF NOT EXISTS library_visible
+  BOOLEAN NOT NULL DEFAULT TRUE
+`)
  await db.query(`CREATE TABLE IF NOT EXISTS account_beat_stems(beat_id UUID NOT NULL REFERENCES account_beats(id) ON DELETE CASCADE,chunk_index INTEGER NOT NULL,data BYTEA NOT NULL,PRIMARY KEY(beat_id,chunk_index))`)
  await db.query('CREATE INDEX IF NOT EXISTS account_beats_user_date_idx ON account_beats(user_id,created_at DESC)')
 }
-export async function saveDesktopBeat(db,userId,file,duration,stems){
- const digest=crypto.createHash('sha256')
+export async function saveDesktopBeat(
+  db,
+  userId,
+  file,
+  duration,
+  stems,
+  options = {}
+) {
+  const libraryVisible = options.libraryVisible !== false const digest=crypto.createHash('sha256')
  for await(const chunk of fs.createReadStream(file.path))digest.update(chunk)
  const audioHash=digest.digest('hex')
  const title=String(file.originalname || 'Untitled beat').split(/[\\/]/).pop().replace(/\.mp3$/i,'').trim().slice(0,100) || 'Untitled beat'
  const client=await db.connect()
  try{
   await client.query('BEGIN')
-  const row=await client.query(`INSERT INTO account_beats(id,user_id,title,audio_hash,audio_size,duration) VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT(user_id,audio_hash) DO NOTHING RETURNING id,title,created_at,duration`,[crypto.randomUUID(),userId,title,audioHash,fs.statSync(file.path).size,Number.isFinite(Number(duration))?Number(duration):null])
-  if(row.rowCount){let index=0;for await(const chunk of fs.createReadStream(file.path,{highWaterMark:chunkSize}))await client.query('INSERT INTO account_beat_audio(beat_id,chunk_index,data) VALUES($1,$2,$3)',[row.rows[0].id,index++,chunk])}
-  else {const existing=await client.query('SELECT id,title,created_at,duration FROM account_beats WHERE user_id=$1 AND audio_hash=$2',[userId,audioHash]);row.rows=existing.rows}
+const row = await client.query(
+  `
+    INSERT INTO account_beats (
+      id,
+      user_id,
+      title,
+      audio_hash,
+      audio_size,
+      duration,
+      library_visible
+    )
+    VALUES ($1, $2, $3, $4, $5, $6, $7)
+    ON CONFLICT (user_id, audio_hash)
+    DO NOTHING
+    RETURNING
+      id,
+      title,
+      created_at,
+      duration,
+      library_visible
+  `,
+  [
+    crypto.randomUUID(),
+    userId,
+    title,
+    audioHash,
+    fs.statSync(file.path).size,
+    Number.isFinite(Number(duration))
+      ? Number(duration)
+      : null,
+    libraryVisible
+  ]
+)
+
+if (row.rowCount) {
+  let index = 0
+
+  for await (
+    const chunk of fs.createReadStream(file.path, {
+      highWaterMark: chunkSize
+    })
+  ) {
+    await client.query(
+      `
+        INSERT INTO account_beat_audio (
+          beat_id,
+          chunk_index,
+          data
+        )
+        VALUES ($1, $2, $3)
+      `,
+      [row.rows[0].id, index++, chunk]
+    )
+  }
+} else {
+  const existing = await client.query(
+    `
+      SELECT
+        id,
+        title,
+        created_at,
+        duration,
+        library_visible
+      FROM account_beats
+      WHERE user_id = $1
+        AND audio_hash = $2
+    `,
+    [userId, audioHash]
+  )
+
+  row.rows = existing.rows
+}
+
+/*
+ * Um upload avulso pode tornar o beat visível.
+ * Um upload para pack nunca esconde um beat
+ * avulso que já existia.
+ */
+if (libraryVisible) {
+  await client.query(
+    `
+      UPDATE account_beats
+      SET library_visible = TRUE
+      WHERE id = $1
+        AND user_id = $2
+    `,
+    [row.rows[0].id, userId]
+  )
+
+  row.rows[0].library_visible = true
+}
   if(stems){
    const beat=row.rows[0]
    await client.query('SELECT id FROM account_beats WHERE id=$1 AND user_id=$2 FOR UPDATE',[beat.id,userId])
