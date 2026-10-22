@@ -16,6 +16,7 @@ export async function setupBeatLibrary(db){
   ADD COLUMN IF NOT EXISTS library_visible
   BOOLEAN NOT NULL DEFAULT TRUE
 `)
+ await db.query('ALTER TABLE account_beats ADD COLUMN IF NOT EXISTS cover_key TEXT')
  await db.query(`CREATE TABLE IF NOT EXISTS account_beat_stems(beat_id UUID NOT NULL REFERENCES account_beats(id) ON DELETE CASCADE,chunk_index INTEGER NOT NULL,data BYTEA NOT NULL,PRIMARY KEY(beat_id,chunk_index))`)
  await db.query('CREATE INDEX IF NOT EXISTS account_beats_user_date_idx ON account_beats(user_id,created_at DESC)')
 }
@@ -150,7 +151,7 @@ export function audioRange(header,size){
  if(!match || (!match[1] && !match[2]))return null
  const start=match[1]?Number(match[1]):Math.max(0,size-Number(match[2]))
  const end=match[1]?(match[2]?Math.min(Number(match[2]),size-1):size-1):size-1
- return Number.isSafeInteger(start)&&Number.isSafeInteger(end)&&start>=0&&start<size&&end>=start?{start,end,partial:true}:null
+ return Number.isSafeInteger(start)&&start>=0&&start<size&&end>=start?{start,end,partial:true}:null
 }
 export function registerBeatLibrary(router,{db,account}){
 router.get('/beats', account, async (req, res, next) => {
@@ -235,7 +236,7 @@ router.delete('/beats/:id', account, async (req, res, next) => {  try{
     }
     const name=String(file.originalname || 'stems.zip').split(/[\\\\/]/).pop().replace(/[\\r\\n\\u0000-\\u001f]/g,'').slice(0,220)
     const size=fs.statSync(file.path).size
-    await client.query('UPDATE account_beats SET stems_name=$1,stems_size=$2,stems_hash=$3 WHERE id=$4 AND user_id=$5',[name,size,hash.digest('hex'),req.params.id,req.account.id])
+    await client.query('UPDATE account_beats SET stems_name=$1,stems_size=$2,stems_hash=$3 WHERE id=$1 AND user_id=$2',[name,size,hash.digest('hex'),req.params.id,req.account.id])
     await client.query('COMMIT')
     res.status(201).json({ok:true,stems_name:name,stems_size:size})
    }catch(error){try{await client.query('ROLLBACK')}catch{};throw error}
@@ -272,7 +273,9 @@ router.delete('/beats/:id', account, async (req, res, next) => {  try{
      const bytes=Buffer.from(chunk.rows[0].data),offset=index*chunkSize
      if(!res.write(bytes.subarray(Math.max(0,start-offset),Math.min(bytes.length,end-offset+1))))await new Promise(resolve=>{
       const done=()=>{res.off('drain',done);res.off('close',done);resolve()}
-      res.once('drain',done);res.once('close',done)
+      res.once('drain',done)
+      res.once('close',done)
+      resolve()
      })
     }
     res.end()
