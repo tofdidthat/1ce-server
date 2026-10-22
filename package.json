@@ -1,5 +1,5 @@
 {
-  "name": "autoshorts-render",
+  "name": "1ce-server",
   "version": "1.0.0",
   "type": "module",
   "scripts": {
@@ -17,7 +17,7 @@
     "yauzl": "3.4.0"
   },
   "devDependencies": {
-    "@electric-sql/pglite": "^0.5.8",
+    "@electric-sql/pglite": "^5.0.8",
     "ffmpeg-static": "^5.3.0",
     "ffprobe-static": "^3.1.0"
   }
