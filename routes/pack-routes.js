@@ -724,19 +724,19 @@ return res.json({ packs })
 
         const deleted = await client.query(
           `
-            DELETE FROM account_beats
-            WHERE id = $1
-              AND user_id = $2
-            RETURNING id
+            DELETE FROM account_pack_beats
+            WHERE pack_id = $1
+              AND beat_id = $2
+            RETURNING beat_id
           `,
-          [beatId, account.id]
+          [packId, beatId]
         )
 
         if (!deleted.rows.length) {
           await client.query('ROLLBACK')
 
           return res.status(404).json({
-            error: 'Beat not found.'
+            error: 'Beat not found in pack.'
           })
         }
 

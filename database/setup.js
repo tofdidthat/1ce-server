@@ -191,12 +191,14 @@ export function createDatabaseSetup({
   `)
   
   await db.query(`
-    CREATE INDEX IF NOT EXISTS account_oauth_transactions_user_idx
+    CREATE INDEX IF NOT EXISTS
+      account_oauth_transactions_user_idx
     ON account_oauth_transactions(user_id)
   `)
   
   await db.query(`
-    CREATE INDEX IF NOT EXISTS account_oauth_transactions_expiry_idx
+    CREATE INDEX IF NOT EXISTS
+      account_oauth_transactions_expiry_idx
     ON account_oauth_transactions(expires_at)
   `)
   
@@ -348,6 +350,13 @@ export function createDatabaseSetup({
           UNIQUE(client_id, chat_id, thread_id)
         )
       `)
+
+      await db.query(`
+        ALTER TABLE telegram_connections
+        ADD COLUMN IF NOT EXISTS user_id INTEGER
+          REFERENCES account_users(id)
+          ON DELETE CASCADE
+      `)
   
       await db.query(`
         CREATE TABLE IF NOT EXISTS telegram_connect_codes (
@@ -368,6 +377,18 @@ export function createDatabaseSetup({
       created_at TIMESTAMPTZ DEFAULT NOW(),
       UNIQUE(client_id, guild_id, channel_id)
     )
+  `)
+
+  await db.query(`
+    ALTER TABLE discord_connections
+    ADD COLUMN IF NOT EXISTS guild_name TEXT
+  `)
+
+  await db.query(`
+    ALTER TABLE discord_connections
+    ADD COLUMN IF NOT EXISTS user_id INTEGER
+      REFERENCES account_users(id)
+      ON DELETE CASCADE
   `)
   
   await db.query(`

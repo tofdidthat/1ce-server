@@ -1,15 +1,8 @@
 import { Router } from 'express'
 import multer from 'multer'
 import fs from 'node:fs'
+import { saveDesktopBeat } from '../beat-library.js'
 
-const beat = await saveDesktopBeat(
-  db,
-  account.id,
-  file,
-  info.format?.duration,
-  undefined,
-  { libraryVisible }
-)
 export function createBeatUploadRouter({
   db,
   getAccountFromRequest,
@@ -130,7 +123,9 @@ const libraryVisible = visibilityValue !== 'false'
           db,
           account.id,
           file,
-          info.format?.duration
+          info.format?.duration,
+          undefined,
+          { libraryVisible }
         )
 
         return res.status(201).json({

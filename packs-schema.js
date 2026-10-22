@@ -36,6 +36,17 @@ export async function setupPacksSchema(db) {
   `)
 
   await db.query(`
+    ALTER TABLE account_packs
+    ADD COLUMN IF NOT EXISTS cover_key TEXT
+  `)
+
+  await db.query(`
+    ALTER TABLE account_packs
+    ADD COLUMN IF NOT EXISTS profile_hidden
+    BOOLEAN NOT NULL DEFAULT FALSE
+  `)
+
+  await db.query(`
     CREATE TABLE IF NOT EXISTS account_pack_beats (
       pack_id UUID NOT NULL
         REFERENCES account_packs(id)

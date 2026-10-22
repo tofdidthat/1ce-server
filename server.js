@@ -282,6 +282,13 @@ app.use(
 )
 
 app.use(
+  createPublicProfileRouter({
+    db,
+    ready: () => databaseSetup.isReady()
+  })
+)
+
+app.use(
   '/api',
   createPackRouter({
     db,
