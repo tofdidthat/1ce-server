@@ -40,7 +40,7 @@ test('durable audio: ownership, deduplication, ranges and rollback',async()=>{
   assert.equal((await get('/beats/'+beat.id+'/audio',1,'bytes=999999999-')).status,416)
   assert.equal(audioRange('bytes=-0',bytes.length),null)
   await fs.writeFile(file,Buffer.from('different'))
-  const failing={...db,connect:async()=>({release(){},query:async(sql,params)=>{if(sql.startsWith('INSERT INTO account_beat_audio'))throw Error('disk failure');return query(sql,params)}})}
+  const failing={...db,connect:async()=>({release(){},query:async(sql,params)=>{if(sql.includes('INSERT INTO account_beat_audio'))throw Error('disk failure');return query(sql,params)}})}
   await assert.rejects(saveDesktopBeat(failing,1,{path:file,originalname:'Fail.mp3'},1),/disk failure/)
   assert.equal((await query('SELECT COUNT(*)::int AS count FROM account_beats WHERE user_id=1')).rows[0].count,1)
   await query('INSERT INTO account_beat_stems(beat_id,chunk_index,data) VALUES($1,0,$2)',[beat.id,Buffer.from('private ZIP')])
@@ -58,4 +58,3 @@ test('durable audio: ownership, deduplication, ranges and rollback',async()=>{
   await pg.close();await fs.rm(file,{force:true});await fs.rmdir(dir)
  }
 })
-
