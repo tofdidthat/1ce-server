@@ -123,7 +123,9 @@ const libraryVisible = visibilityValue !== 'false'
           db,
           account.id,
           file,
-          info.format?.duration
+          info.format?.duration,
+          undefined,
+          { libraryVisible }
         )
 
         return res.status(201).json({
