@@ -21,15 +21,19 @@ export function createUploadStorage() {
       R2_COVERS_PUBLIC_BASE_URL: publicBase
     } = process.env
 
-    if (
-      !accountId ||
-      !accessKeyId ||
-      !secretAccessKey ||
-      !uploadsBucket ||
-      !coversBucket ||
-      !publicBase
-    ) {
-      throw new Error('R2 upload storage is not configured.')
+    const missing = [
+      !accountId && 'R2_ACCOUNT_ID',
+      !accessKeyId && 'R2_ACCESS_KEY_ID',
+      !secretAccessKey && 'R2_SECRET_ACCESS_KEY',
+      !uploadsBucket && 'R2_UPLOADS_BUCKET',
+      !coversBucket && 'R2_COVERS_BUCKET',
+      !publicBase && 'R2_COVERS_PUBLIC_BASE_URL'
+    ].filter(Boolean)
+
+    if (missing.length) {
+      throw new Error(
+        `R2 upload storage is not configured. Missing: ${missing.join(', ')}`
+      )
     }
 
     const publicUrl = new URL(publicBase)
