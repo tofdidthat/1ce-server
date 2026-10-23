@@ -237,7 +237,12 @@ if (!rate.allowed) {
       // Não registra a URL assinada nem o objeto completo do erro.
       console.error(
         'Create upload session failed:',
-        error?.name || 'UnknownError'
+        {
+          name: error?.name,
+          message: error?.message,
+          code: error?.Code ?? error?.code,
+          httpStatusCode: error?.$metadata?.httpStatusCode
+        }
       )
 
       return res.status(500).json({
