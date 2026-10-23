@@ -28,4 +28,4 @@ npm test
 
 ## Deploy
 
-O serviço é implantado no Railway e consome as variáveis de ambiente configuradas no projeto.
+O serviço é implantado no Railway e consome as variáveis de ambiente configuradas no projeto..
