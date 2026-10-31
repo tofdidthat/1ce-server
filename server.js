@@ -190,7 +190,8 @@ app.use(
 app.use(
   createPlatformUploadRouter({
     renders,
-    desktopHandlers
+    desktopHandlers,
+    deleteRender
   })
 )
 
@@ -233,9 +234,7 @@ app.use(
     verifyAccountPassword,
     issueEmailVerificationCode,
     issuePasswordResetCode,
-    hashEmailVerificationCode,
     emailMaxAttempts,
-    createAccountSession,
     getLoginRateState,
     loginMaxIpAttempts,
     loginMaxPairAttempts,
