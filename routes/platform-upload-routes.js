@@ -3,7 +3,8 @@ import fs from 'fs'
 
 export function createPlatformUploadRouter({
   renders,
-  desktopHandlers
+  desktopHandlers,
+  deleteRender
 }) {
   const router = express.Router()
 
@@ -338,6 +339,9 @@ router.post(
         })
       }
 
+      render.publicationBusyUntil =
+        Date.now() + 15 * 60 * 1000
+
       const safeUploadUrl =
         validateYouTubeUploadUrl(
           uploadUrl
@@ -402,6 +406,9 @@ router.post(
         `YouTube upload concluído: ${renderId}`
       )
 
+      render.publicationBusyUntil = 0
+      deleteRender(renderId)
+
       return res.json({
         ok: true,
         renderId,
@@ -412,6 +419,14 @@ router.post(
         'Erro YouTube:',
         error
       )
+
+      const render =
+        renders.get(req.body?.renderId)
+
+      if (render) {
+        render.publicationBusyUntil = 0
+        deleteRender(req.body.renderId)
+      }
 
       return res.status(500).json({
         error:
