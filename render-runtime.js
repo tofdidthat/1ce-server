@@ -7,7 +7,7 @@ import { createRenderService } from './render-service.js'
 
 export function createRenderRuntime({ renders }) {
   const execFileAsync = promisify(execFile)
-  const renderTtlMs = 10 * 60 * 1000
+  const renderTtlMs = 30 * 60 * 1000
 
   const upload = multer({
     dest: os.tmpdir(),
