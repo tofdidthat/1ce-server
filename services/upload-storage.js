@@ -85,6 +85,21 @@ export function createUploadStorage() {
     }
   }
 
+  function isUuid(value) {
+    return typeof value === 'string' &&
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value)
+  }
+
+  function checkBeatAssetKey(key) {
+    if (
+      typeof key !== 'string' ||
+      !/^beats\/[0-9a-f-]{36}\/[0-9a-f-]{36}\/(audio|stems)\/[0-9a-f-]{36}$/.test(key) ||
+      key.includes('..')
+    ) {
+      throw new Error('Invalid beat asset object key.')
+    }
+  }
+
   async function createUploadUrl({
     userId,
     uploadId,
@@ -184,6 +199,89 @@ export function createUploadStorage() {
     return Buffer.concat(chunks, total)
   }
 
+  async function putBeatAsset({
+    userId,
+    beatId,
+    kind,
+    body,
+    contentType,
+    contentLength
+  }) {
+    if (!isUuid(userId) || !isUuid(beatId)) {
+      throw new Error('Invalid beat asset owner.')
+    }
+
+    if (!['audio', 'stems'].includes(kind)) {
+      throw new Error('Unsupported beat asset kind.')
+    }
+
+    if (!body) {
+      throw new Error('Empty beat asset body.')
+    }
+
+    if (
+      !Number.isSafeInteger(contentLength) ||
+      contentLength <= 0
+    ) {
+      throw new Error('Invalid beat asset length.')
+    }
+
+    const {
+      client: s3,
+      uploadsBucket
+    } = config()
+
+    const key = `beats/${userId}/${beatId}/${kind}/${randomUUID()}`
+
+    await s3.send(
+      new PutObjectCommand({
+        Bucket: uploadsBucket,
+        Key: key,
+        Body: body,
+        ContentType: contentType,
+        ContentLength: contentLength
+      })
+    )
+
+    return {
+      storage: 'r2',
+      bucket: uploadsBucket,
+      key
+    }
+  }
+
+  async function getBeatAsset({ key }) {
+    checkBeatAssetKey(key)
+
+    const {
+      client: s3,
+      uploadsBucket
+    } = config()
+
+    return s3.send(
+      new GetObjectCommand({
+        Bucket: uploadsBucket,
+        Key: key
+      })
+    )
+  }
+
+  async function deleteBeatAsset({ key }) {
+    checkBeatAssetKey(key)
+
+    const {
+      client: s3,
+      uploadsBucket
+    } = config()
+
+    await s3.send(
+      new DeleteObjectCommand({
+        Bucket: uploadsBucket,
+        Key: key
+      })
+    )
+  }
+
   async function putCover({
     kind,
     userId,
@@ -271,6 +369,9 @@ export function createUploadStorage() {
     createUploadUrl,
     inspectTemporary,
     readTemporary,
+    putBeatAsset,
+    getBeatAsset,
+    deleteBeatAsset,
     putCover,
     coverUrl,
     deleteTemporary,
