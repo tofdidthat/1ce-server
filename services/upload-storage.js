@@ -85,6 +85,10 @@ export function createUploadStorage() {
     }
   }
 
+  function isPositiveInteger(value) {
+    return Number.isSafeInteger(value) && value > 0
+  }
+
   function isUuid(value) {
     return typeof value === 'string' &&
       /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value)
@@ -93,7 +97,7 @@ export function createUploadStorage() {
   function checkBeatAssetKey(key) {
     if (
       typeof key !== 'string' ||
-      !/^beats\/[0-9a-f-]{36}\/[0-9a-f-]{36}\/(audio|stems)\/[0-9a-f-]{36}$/.test(key) ||
+      !/^beats\/\d+\/[0-9a-f-]{36}\/(audio|stems)\/[0-9a-f-]{36}$/.test(key) ||
       key.includes('..')
     ) {
       throw new Error('Invalid beat asset object key.')
@@ -207,7 +211,11 @@ export function createUploadStorage() {
     contentType,
     contentLength
   }) {
-    if (!isUuid(userId) || !isUuid(beatId)) {
+    if (!isPositiveInteger(userId)) {
+      throw new Error('Invalid beat asset owner.')
+    }
+
+    if (!isUuid(beatId)) {
       throw new Error('Invalid beat asset owner.')
     }
 
