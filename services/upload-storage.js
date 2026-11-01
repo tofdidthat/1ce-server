@@ -250,7 +250,7 @@ export function createUploadStorage() {
     }
   }
 
-  async function getBeatAsset({ key }) {
+  async function getBeatAsset({ key, range }) {
     checkBeatAssetKey(key)
 
     const {
@@ -261,7 +261,10 @@ export function createUploadStorage() {
     return s3.send(
       new GetObjectCommand({
         Bucket: uploadsBucket,
-        Key: key
+        Key: key,
+        ...(typeof range === 'string' && range
+          ? { Range: range }
+          : {})
       })
     )
   }
