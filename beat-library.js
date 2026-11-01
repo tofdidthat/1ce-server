@@ -8,6 +8,10 @@ import { createUploadStorage } from './services/upload-storage.js'
 const chunkSize=1024*1024
 const beatStorage=createUploadStorage()
 
+function isR2ConfigurationError(error){
+  return String(error?.message || '').startsWith('R2 upload storage is not configured.')
+}
+
 async function deleteBeatObject(key){
   if(!key)return
   try{
@@ -20,14 +24,21 @@ async function deleteBeatObject(key){
 async function uploadBeatAsset(userId,beatId,kind,file){
   const stat=fs.statSync(file.path)
   const contentType=kind==='stems'?'application/zip':'audio/mpeg'
-  return beatStorage.putBeatAsset({
-    userId,
-    beatId,
-    kind,
-    body:fs.createReadStream(file.path),
-    contentType,
-    contentLength:stat.size
-  })
+  try{
+    return await beatStorage.putBeatAsset({
+      userId,
+      beatId,
+      kind,
+      body:fs.createReadStream(file.path),
+      contentType,
+      contentLength:stat.size
+    })
+  }catch(error){
+    if(isR2ConfigurationError(error)){
+      return {storage:'postgres'}
+    }
+    throw error
+  }
 }
 
 export async function setupBeatLibrary(db){
@@ -65,12 +76,7 @@ export async function saveDesktopBeat(
  const audioHash=digest.digest('hex')
  const title=String(file.originalname || 'Untitled beat').split(/[\\/]/).pop().replace(/\.mp3$/i,'').trim().slice(0,100) || 'Untitled beat'
  const beatId=crypto.randomUUID()
- let audioUpload
- try{
-  audioUpload=await uploadBeatAsset(userId,beatId,'audio',file)
- }catch(error){
-  throw error
- }
+ const audioUpload=await uploadBeatAsset(userId,beatId,'audio',file)
  const client=await db.connect()
  let oldStemsKey
  let stemsUpload
@@ -88,7 +94,7 @@ export async function saveDesktopBeat(
       audio_storage,
       audio_object_key
     )
-    VALUES ($1,$2,$3,$4,$5,$6,$7,'r2',$8)
+    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
     ON CONFLICT (user_id,audio_hash)
     DO NOTHING
     RETURNING id,title,created_at,duration,library_visible`,
@@ -100,7 +106,8 @@ export async function saveDesktopBeat(
     fs.statSync(file.path).size,
     Number.isFinite(Number(duration))?Number(duration):null,
     libraryVisible,
-    audioUpload.key
+    audioUpload.storage,
+    audioUpload.key || null
    ]
   )
   if(!row.rowCount){
@@ -111,7 +118,16 @@ export async function saveDesktopBeat(
     [userId,audioHash]
    )
    row.rows=existing.rows
-   await deleteBeatObject(audioUpload.key)
+   if(audioUpload.key)await deleteBeatObject(audioUpload.key)
+  }else if(audioUpload.storage==='postgres'){
+   let index=0
+   for await(const chunk of fs.createReadStream(file.path,{highWaterMark:chunkSize})){
+    await client.query(
+     `INSERT INTO account_beat_audio(beat_id,chunk_index,data)
+      VALUES ($1,$2,$3)`,
+     [row.rows[0].id,index++,chunk]
+    )
+   }
   }
   if(libraryVisible){
    await client.query(
@@ -134,6 +150,15 @@ export async function saveDesktopBeat(
    const hash=crypto.createHash('sha256')
    for await(const chunk of fs.createReadStream(stems.path))hash.update(chunk)
    await client.query('DELETE FROM account_beat_stems WHERE beat_id=$1',[beat.id])
+   if(stemsUpload.storage==='postgres'){
+    let index=0
+    for await(const chunk of fs.createReadStream(stems.path,{highWaterMark:chunkSize})){
+     await client.query(
+      'INSERT INTO account_beat_stems(beat_id,chunk_index,data) VALUES($1,$2,$3)',
+      [beat.id,index++,chunk]
+     )
+    }
+   }
    const name=String(stems.originalname || 'stems.zip').split(/[\\\\/]/).pop().replace(/[\r\n\u0000-\u001f]/g,'').slice(0,220)
    const size=fs.statSync(stems.path).size
    await client.query(
@@ -141,10 +166,10 @@ export async function saveDesktopBeat(
      SET stems_name=$1,
          stems_size=$2,
          stems_hash=$3,
-         stems_storage='r2',
-         stems_object_key=$4
-     WHERE id=$5 AND user_id=$6`,
-    [name,size,hash.digest('hex'),stemsUpload.key,beat.id,userId]
+         stems_storage=$4,
+         stems_object_key=$5
+     WHERE id=$6 AND user_id=$7`,
+    [name,size,hash.digest('hex'),stemsUpload.storage,stemsUpload.key || null,beat.id,userId]
    )
    beat.stems_name=name
    beat.stems_size=size
@@ -154,8 +179,8 @@ export async function saveDesktopBeat(
   return row.rows[0]
  }catch(error){
   try{await client.query('ROLLBACK')}catch{}
-  if(audioUpload)await deleteBeatObject(audioUpload.key)
-  if(stemsUpload)await deleteBeatObject(stemsUpload.key)
+  if(audioUpload?.key)await deleteBeatObject(audioUpload.key)
+  if(stemsUpload?.key)await deleteBeatObject(stemsUpload.key)
   throw error
  }finally{
   client.release()
@@ -267,9 +292,18 @@ router.post('/beats/:id/stems',account,(req,res,next)=>stemsUpload(req,res,async
     'SELECT stems_object_key FROM account_beats WHERE id=$1 AND user_id=$2 FOR UPDATE',
     [beatId,req.account.id]
    )
-   if(!beat.rowCount){await client.query('ROLLBACK');await deleteBeatObject(upload.key);return res.sendStatus(404)}
+   if(!beat.rowCount){await client.query('ROLLBACK');if(upload.key)await deleteBeatObject(upload.key);return res.sendStatus(404)}
    oldKey=beat.rows[0].stems_object_key
    await client.query('DELETE FROM account_beat_stems WHERE beat_id=$1',[beatId])
+   if(upload.storage==='postgres'){
+    let index=0
+    for await(const chunk of fs.createReadStream(file.path,{highWaterMark:chunkSize})){
+     await client.query(
+      'INSERT INTO account_beat_stems(beat_id,chunk_index,data) VALUES($1,$2,$3)',
+      [beatId,index++,chunk]
+     )
+    }
+   }
    const name=String(file.originalname || 'stems.zip').split(/[\\\\/]/).pop().replace(/[\r\n\u0000-\u001f]/g,'').slice(0,220)
    const size=fs.statSync(file.path).size
    await client.query(
@@ -277,17 +311,17 @@ router.post('/beats/:id/stems',account,(req,res,next)=>stemsUpload(req,res,async
      SET stems_name=$1,
          stems_size=$2,
          stems_hash=$3,
-         stems_storage='r2',
-         stems_object_key=$4
-     WHERE id=$5 AND user_id=$6`,
-    [name,size,hash.digest('hex'),upload.key,beatId,req.account.id]
+         stems_storage=$4,
+         stems_object_key=$5
+     WHERE id=$6 AND user_id=$7`,
+    [name,size,hash.digest('hex'),upload.storage,upload.key || null,beatId,req.account.id]
    )
    await client.query('COMMIT')
    if(oldKey)await deleteBeatObject(oldKey)
    res.status(201).json({ok:true,stems_name:name,stems_size:size})
   }catch(error){
    try{await client.query('ROLLBACK')}catch{}
-   await deleteBeatObject(upload.key)
+   if(upload.key)await deleteBeatObject(upload.key)
    throw error
   }finally{
    client.release()
